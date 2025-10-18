@@ -1,17 +1,17 @@
 # Основные зависимости
-flask==3.1.2
-flask-cors==6.0.1
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
 supabase==2.20.0
 python-dotenv==1.0.0
+pydantic>=2.9.0
+pydantic-settings>=2.0.0
 
 # Разработка и тестирование
 pytest==8.0.0
 pytest-cov==4.1.0
 pytest-mock==3.12.0
+httpx==0.27.0
 black==24.2.0
 flake8==7.0.0
 mypy==1.8.0
-
-# Валидация данных
-pydantic>=2.9.0
 
