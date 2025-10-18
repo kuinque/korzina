@@ -29,7 +29,7 @@ docker-build: ## Собрать Docker образ
 	docker build -t korzina-api .
 
 docker-run: ## Запустить в Docker
-	docker-compose up --build
+	docker run -p 5000:5000 --env-file .env korzina-api
 
 clean: ## Очистить временные файлы
 	find . -type f -name "*.pyc" -delete
