@@ -23,11 +23,11 @@ RUN useradd --create-home --shell /bin/bash app && chown -R app:app /app
 USER app
 
 # Переменные окружения
-ENV FLASK_ENV=production
+ENV APP_ENV=production
 ENV PYTHONPATH=/app
 
 # Открытие порта
 EXPOSE 5000
 
-# Команда запуска
-CMD ["python", "main.py"]
+# Команда запуска с uvicorn
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "5000"]

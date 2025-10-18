@@ -3,6 +3,7 @@
 """
 import pytest
 from unittest.mock import Mock, patch
+from fastapi.testclient import TestClient
 from app.api import create_app
 from app.models import SearchRequest, ShopSolution, ProductMatch, MatchType
 
@@ -10,15 +11,13 @@ from app.models import SearchRequest, ShopSolution, ProductMatch, MatchType
 @pytest.fixture
 def app():
     """Создать тестовое приложение"""
-    app = create_app()
-    app.config['TESTING'] = True
-    return app
+    return create_app()
 
 
 @pytest.fixture
 def client(app):
     """Создать тестовый клиент"""
-    return app.test_client()
+    return TestClient(app)
 
 
 @pytest.fixture
@@ -53,7 +52,7 @@ class TestHealthEndpoint:
         response = client.get('/api/health')
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = response.json()
         assert data['status'] == 'success'
         assert data['database'] == 'healthy'
     
@@ -65,8 +64,8 @@ class TestHealthEndpoint:
         response = client.get('/api/health')
         
         assert response.status_code == 500
-        data = response.get_json()
-        assert data['status'] == 'error'
+        data = response.json()
+        assert data['detail'] == 'Database connection failed'
 
 
 class TestStatsEndpoint:
@@ -82,7 +81,7 @@ class TestStatsEndpoint:
         response = client.get('/api/stats')
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = response.json()
         assert data['status'] == 'success'
         assert data['shops_count'] == 2
         assert data['products_count'] == 2
@@ -91,32 +90,21 @@ class TestStatsEndpoint:
 class TestSearchEndpoint:
     """Тесты для endpoint /api/search"""
     
-    def test_search_no_json(self, client):
-        """Тест запроса без JSON"""
-        response = client.post('/api/search')
-        
-        assert response.status_code == 400
-        data = response.get_json()
-        assert data['status'] == 'error'
-        assert 'Content-Type must be application/json' in data['message']
-    
     def test_search_no_products_field(self, client):
         """Тест запроса без поля products"""
         response = client.post('/api/search', json={})
         
-        assert response.status_code == 400
-        data = response.get_json()
-        assert data['status'] == 'error'
-        assert 'No JSON data provided' in data['message']
+        assert response.status_code == 422  # FastAPI validation error
+        data = response.json()
+        assert 'detail' in data
     
     def test_search_empty_products(self, client):
         """Тест запроса с пустым списком товаров"""
         response = client.post('/api/search', json={'products': ''})
         
-        assert response.status_code == 400
-        data = response.get_json()
-        assert data['status'] == 'error'
-        assert 'Products string is empty' in data['message']
+        assert response.status_code == 422  # FastAPI validation error
+        data = response.json()
+        assert 'detail' in data
     
     @patch('app.services.shop_search_service.ShopSearchService.find_cheapest_shop')
     def test_search_success(self, mock_find_shop, client, mock_shop_solution):
@@ -126,7 +114,7 @@ class TestSearchEndpoint:
         response = client.post('/api/search', json={'products': 'яблоки'})
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = response.json()
         assert data['status'] == 'success'
         assert data['best_shop']['name'] == 'Test Shop'
         assert data['total_price'] == 100.0
@@ -139,9 +127,9 @@ class TestSearchEndpoint:
         response = client.post('/api/search', json={'products': 'яблоки'})
         
         assert response.status_code == 404
-        data = response.get_json()
-        assert data['status'] == 'error'
-        assert 'No suitable shops found' in data['message']
+        data = response.json()
+        assert 'detail' in data
+        assert 'No suitable shops found' in data['detail']
 
 
 class TestSearchGetEndpoint:
@@ -151,10 +139,9 @@ class TestSearchGetEndpoint:
         """Тест GET запроса без параметра products"""
         response = client.get('/api/search/get')
         
-        assert response.status_code == 400
-        data = response.get_json()
-        assert data['status'] == 'error'
-        assert 'Missing \'products\' parameter' in data['message']
+        assert response.status_code == 422  # FastAPI validation error
+        data = response.json()
+        assert 'detail' in data
     
     @patch('app.services.shop_search_service.ShopSearchService.find_cheapest_shop')
     def test_search_get_success(self, mock_find_shop, client, mock_shop_solution):
@@ -164,6 +151,6 @@ class TestSearchGetEndpoint:
         response = client.get('/api/search/get?products=яблоки')
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = response.json()
         assert data['status'] == 'success'
         assert data['best_shop'] == 'Test Shop'

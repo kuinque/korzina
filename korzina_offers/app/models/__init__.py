@@ -1,12 +1,12 @@
 """
 Модели данных
 """
-from dataclasses import dataclass
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from enum import Enum
+from pydantic import BaseModel, Field, field_validator
 
 
-class MatchType(Enum):
+class MatchType(str, Enum):
     """Типы сопоставления товаров"""
     EXACT_FULL = "exact_full"
     PARTIAL_FULL = "partial_full"
@@ -15,8 +15,7 @@ class MatchType(Enum):
     NONE = "none"
 
 
-@dataclass
-class ProductMatch:
+class ProductMatch(BaseModel):
     """Результат сопоставления товара"""
     target: str
     found: str
@@ -25,9 +24,11 @@ class ProductMatch:
     match_type: MatchType
     product_id: Optional[str] = None
 
+    class Config:
+        use_enum_values = True
 
-@dataclass
-class ShopSolution:
+
+class ShopSolution(BaseModel):
     """Решение для магазина"""
     shop_id: str
     shop_name: str
@@ -37,26 +38,28 @@ class ShopSolution:
     products_found_count: int
 
 
-@dataclass
-class SearchRequest:
+class SearchRequest(BaseModel):
     """Запрос на поиск товаров"""
     products: List[str]
     
+    @field_validator('products', mode='before')
     @classmethod
-    def from_string(cls, products_string: str) -> 'SearchRequest':
-        """Создать из строки товаров"""
-        products = [name.strip() for name in products_string.split(",") if name.strip()]
-        return cls(products=products)
-    
-    @classmethod
-    def from_list(cls, products_list: List[str]) -> 'SearchRequest':
-        """Создать из списка товаров"""
-        products = [str(p).strip() for p in products_list if str(p).strip()]
-        return cls(products=products)
+    def validate_products(cls, v: Union[List[str], str]) -> List[str]:
+        """Валидация и преобразование товаров"""
+        if isinstance(v, str):
+            products = [name.strip() for name in v.split(",") if name.strip()]
+        elif isinstance(v, list):
+            products = [str(p).strip() for p in v if str(p).strip()]
+        else:
+            raise ValueError("Products must be either a string or a list")
+        
+        if not products:
+            raise ValueError("Products list cannot be empty")
+        
+        return products
 
 
-@dataclass
-class SearchResponse:
+class SearchResponse(BaseModel):
     """Ответ на поиск товаров"""
     status: str
     best_shop: Optional[Dict[str, Any]] = None
@@ -66,3 +69,31 @@ class SearchResponse:
     match_percentage: Optional[float] = None
     products: Optional[List[Dict[str, Any]]] = None
     error: Optional[str] = None
+
+
+class ProductsQueryParams(BaseModel):
+    """Параметры запроса товаров магазина"""
+    shop: str = Field(..., description="Название магазина")
+    q: Optional[str] = Field(None, description="Поисковый запрос")
+
+
+class HealthResponse(BaseModel):
+    """Ответ health check"""
+    status: str
+    message: str
+    version: str
+    database: str
+
+
+class StatsResponse(BaseModel):
+    """Ответ со статистикой"""
+    status: str
+    shops_count: int
+    products_count: int
+    shops: List[str]
+
+
+class ErrorResponse(BaseModel):
+    """Ответ с ошибкой"""
+    status: str = "error"
+    message: str

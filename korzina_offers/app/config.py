@@ -1,50 +1,55 @@
 """
 Конфигурация приложения
 """
-import os
-from typing import Optional
-from dataclasses import dataclass
-from dotenv import load_dotenv
-
-# Загружаем переменные окружения из .env файла
-load_dotenv()
+from typing import List
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
 
 
-@dataclass
-class Config:
+class Config(BaseSettings):
     """Основная конфигурация приложения"""
     
-    # Flask настройки
-    FLASK_ENV: str = os.getenv('FLASK_ENV', 'development')
-    DEBUG: bool = os.getenv('DEBUG', 'True').lower() == 'true'
-    HOST: str = os.getenv('HOST', '0.0.0.0')
-    PORT: int = int(os.getenv('PORT', '5000'))
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False
+    )
+    
+    # Application настройки
+    APP_ENV: str = "development"
+    DEBUG: bool = True
+    HOST: str = "0.0.0.0"
+    PORT: int = 5000
     
     # Supabase настройки
-    SUPABASE_URL: str = os.getenv('SUPABASE_URL', '')
-    SUPABASE_KEY: str = os.getenv('SUPABASE_KEY', '')
+    SUPABASE_URL: str
+    SUPABASE_KEY: str
     
     # Логирование
-    LOG_LEVEL: str = os.getenv('LOG_LEVEL', 'INFO')
-    LOG_FORMAT: str = os.getenv('LOG_FORMAT', '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     
     # API настройки
-    API_VERSION: str = os.getenv('API_VERSION', 'v1')
-    CORS_ORIGINS: str = os.getenv('CORS_ORIGINS', '*')
+    API_VERSION: str = "v1"
+    API_TITLE: str = "Korzina Offers API"
+    API_DESCRIPTION: str = "Микросервис для поиска товаров в магазинах с интеллектуальным алгоритмом сопоставления"
+    CORS_ORIGINS: str = "*"
     
     # Бизнес логика
-    PENALTY_PRICE: float = float(os.getenv('PENALTY_PRICE', '1000.0'))
-    MIN_SIMILARITY_THRESHOLD: float = float(os.getenv('MIN_SIMILARITY_THRESHOLD', '0.6'))
+    PENALTY_PRICE: float = 1000.0
+    MIN_SIMILARITY_THRESHOLD: float = 0.6
     
-    def __post_init__(self):
-        """Валидация конфигурации"""
-        if not self.SUPABASE_URL or not self.SUPABASE_KEY:
-            raise ValueError("SUPABASE_URL и SUPABASE_KEY должны быть установлены")
+    @property
+    def cors_origins_list(self) -> List[str]:
+        """Получить список CORS origins"""
+        if self.CORS_ORIGINS == "*":
+            return ["*"]
+        return [origin.strip() for origin in self.CORS_ORIGINS.split(',')]
     
     @property
     def is_production(self) -> bool:
         """Проверка на продакшн окружение"""
-        return self.FLASK_ENV.lower() == 'production'
+        return self.APP_ENV.lower() == 'production'
 
 
 # Глобальный экземпляр конфигурации
