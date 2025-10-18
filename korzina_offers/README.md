@@ -8,10 +8,10 @@
 
 ```
 app/
-├── api/              # API слой (FastAPI контроллеры, маршруты)
+├── api/              # API слой (Flask контроллеры, маршруты)
 ├── services/         # Бизнес-логика
 ├── database/         # Слой работы с БД
-├── models/           # Pydantic модели данных
+├── models/           # Модели данных
 ├── core/             # Основные компоненты (конфиг, логи, константы)
 └── config.py         # Конфигурация приложения
 ```
@@ -42,7 +42,7 @@ cp .env.example .env
 ```bash
 make run
 # или
-uvicorn main:app --reload
+python main.py
 ```
 
 ## 🐳 Docker
@@ -50,9 +50,9 @@ uvicorn main:app --reload
 ### Сборка и запуск
 ```bash
 make docker-build
-make docker-run
 # или
-docker-compose up --build
+docker build -t korzina-api .
+docker run -p 5000:5000 --env-file .env korzina-api
 ```
 
 ## 📚 API Endpoints
@@ -63,10 +63,6 @@ docker-compose up --build
 | `GET` | `/api/stats` | Статистика БД |
 | `POST` | `/api/search` | Поиск товаров (основной) |
 | `GET` | `/api/search/get` | Поиск товаров (GET для тестов) |
-
-### 📖 Документация API
-- **Swagger UI**: http://localhost:5000/docs
-- **ReDoc**: http://localhost:5000/redoc
 
 ### Примеры запросов
 
