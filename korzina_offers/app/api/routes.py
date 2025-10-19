@@ -88,6 +88,59 @@ async def get_stats() -> StatsResponse:
 
 
 @router.get(
+    "/offers",
+    summary="Получить список офферов",
+    description="Получить список офферов с пагинацией и фильтрацией"
+)
+async def get_offers(
+    limit: int = Query(20, description="Количество офферов на странице", ge=1, le=100),
+    offset: int = Query(0, description="Смещение для пагинации", ge=0),
+    seller: Optional[str] = Query(None, description="Фильтр по продавцу"),
+    category: Optional[str] = Query(None, description="Фильтр по категории"),
+    q: Optional[str] = Query(None, description="Поиск по названию")
+):
+    """Получить список офферов с пагинацией"""
+    try:
+        # Получаем все офферы
+        all_offers = db_client.get_all_offers()
+        
+        # Применяем фильтры
+        filtered_offers = all_offers
+        
+        if seller:
+            filtered_offers = [o for o in filtered_offers if o.get("seller_name") == seller]
+        
+        if category:
+            filtered_offers = [o for o in filtered_offers if o.get("category_name") == category]
+        
+        if q:
+            q_lower = q.lower()
+            filtered_offers = [
+                o for o in filtered_offers 
+                if q_lower in str(o.get("title", "")).lower()
+            ]
+        
+        # Применяем пагинацию
+        total = len(filtered_offers)
+        paginated_offers = filtered_offers[offset:offset + limit]
+        
+        return {
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "count": len(paginated_offers),
+            "offers": paginated_offers
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting offers: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error"
+        )
+
+
+@router.get(
     "/products",
     summary="Получить предложения продавца",
     description="Получить список предложений для конкретного продавца с опциональным поиском"

@@ -102,6 +102,63 @@ class TestStatsEndpoint:
         assert data['products_count'] == 2
 
 
+class TestOffersEndpoint:
+    """Тесты для endpoint /api/offers"""
+    
+    @patch('app.database.client.db_client.get_all_offers')
+    def test_get_offers_default(self, mock_offers, client):
+        """Тест получения офферов с дефолтными параметрами"""
+        mock_offers.return_value = [
+            {'offer_id': i, 'title': f'Product {i}', 'seller_name': 'Test Seller'}
+            for i in range(1, 26)
+        ]
+        
+        response = client.get('/api/offers')
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data['total'] == 25
+        assert data['limit'] == 20
+        assert data['offset'] == 0
+        assert data['count'] == 20
+        assert len(data['offers']) == 20
+    
+    @patch('app.database.client.db_client.get_all_offers')
+    def test_get_offers_pagination(self, mock_offers, client):
+        """Тест пагинации офферов"""
+        mock_offers.return_value = [
+            {'offer_id': i, 'title': f'Product {i}', 'seller_name': 'Test Seller'}
+            for i in range(1, 26)
+        ]
+        
+        response = client.get('/api/offers?limit=5&offset=10')
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data['total'] == 25
+        assert data['limit'] == 5
+        assert data['offset'] == 10
+        assert data['count'] == 5
+        assert len(data['offers']) == 5
+    
+    @patch('app.database.client.db_client.get_all_offers')
+    def test_get_offers_filter_by_seller(self, mock_offers, client):
+        """Тест фильтрации по продавцу"""
+        mock_offers.return_value = [
+            {'offer_id': 1, 'title': 'Product 1', 'seller_name': 'Seller A'},
+            {'offer_id': 2, 'title': 'Product 2', 'seller_name': 'Seller B'},
+            {'offer_id': 3, 'title': 'Product 3', 'seller_name': 'Seller A'},
+        ]
+        
+        response = client.get('/api/offers?seller=Seller A')
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data['total'] == 2
+        assert data['count'] == 2
+        assert all(o['seller_name'] == 'Seller A' for o in data['offers'])
+
+
 class TestSearchEndpoint:
     """Тесты для endpoint /api/search"""
     
