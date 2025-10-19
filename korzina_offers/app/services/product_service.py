@@ -43,6 +43,7 @@ class ProductService:
         target_clean = ProductService.remove_stop_words(target_product)
         
         logger.debug(f"Searching for product: '{target_product}' (clean: '{target_clean}')")
+        logger.debug(f"Available products count: {len(shop_products)}")
         
         for product_id, product_data in shop_products.items():
             if product_id in used_products:
@@ -53,6 +54,8 @@ class ProductService:
             match_priority = 0
             similarity_score = 0
             
+            logger.debug(f"Checking product: id={product_id}, name='{product_name}', clean='{product_clean}'")
+            
             # 1. ТОЧНОЕ СОВПАДЕНИЕ (полное, с учетом стоп-слов)
             if target_product.lower() == product_name.lower():
                 match_priority = MATCH_PRIORITIES['exact_full']
@@ -60,28 +63,35 @@ class ProductService:
                 logger.debug(f"Exact full match: '{product_name}'")
             
             # 2. ЧАСТИЧНОЕ СОВПАДЕНИЕ (с учетом стоп-слов)
-            elif (match_priority < MATCH_PRIORITIES['partial_full'] and
+            if (match_priority < MATCH_PRIORITIES['partial_full'] and
                   (target_product.lower() in product_name.lower() or
                    product_name.lower() in target_product.lower())):
                 similarity = SequenceMatcher(None, target_product.lower(), product_name.lower()).ratio()
-                if similarity >= SIMILARITY_THRESHOLDS['partial_full']:
+                logger.debug(f"Partial full check: similarity={similarity:.2f}, threshold={SIMILARITY_THRESHOLDS['partial_full']}")
+                if similarity >= SIMILARITY_THRESHOLDS['partial_full'] and match_priority < MATCH_PRIORITIES['partial_full']:
                     match_priority = MATCH_PRIORITIES['partial_full']
                     similarity_score = similarity
                     logger.debug(f"Partial full match: '{product_name}' (similarity: {similarity:.2f})")
             
             # 3. ТОЧНОЕ СОВПАДЕНИЕ БЕЗ СТОП-СЛОВ
-            elif match_priority < MATCH_PRIORITIES['exact_clean'] and target_clean.lower() == product_clean.lower():
+            if match_priority < MATCH_PRIORITIES['exact_clean'] and target_clean.lower() == product_clean.lower():
                 match_priority = MATCH_PRIORITIES['exact_clean']
                 similarity_score = 0.9
                 logger.debug(f"Exact clean match: '{product_name}'")
             
-            # 4. ЧАСТИЧНОЕ СОВПАДЕНИЕ БЕЗ СТОП-СЛОВ (только если не было частичного совпадения с полным текстом)
-            elif (match_priority < MATCH_PRIORITIES['partial_clean'] and 
-                  match_priority < MATCH_PRIORITIES['partial_full'] and
+            # 4. ЧАСТИЧНОЕ СОВПАДЕНИЕ БЕЗ СТОП-СЛОВ
+            if (match_priority < MATCH_PRIORITIES['partial_clean'] and
                   (target_clean.lower() in product_clean.lower() or
                    product_clean.lower() in target_clean.lower())):
+                # Если одно слово содержится в другом, используем более мягкий порог
                 similarity = SequenceMatcher(None, target_clean.lower(), product_clean.lower()).ratio()
-                if similarity >= SIMILARITY_THRESHOLDS['partial_clean']:
+                # Если target полностью содержится в product - это хорошее совпадение
+                contains_threshold = SIMILARITY_THRESHOLDS['partial_clean']
+                if target_clean.lower() in product_clean.lower():
+                    contains_threshold = 0.4  # Более мягкий порог при вхождении
+                
+                logger.debug(f"Partial clean check: similarity={similarity:.2f}, threshold={contains_threshold}")
+                if similarity >= contains_threshold and match_priority < MATCH_PRIORITIES['partial_clean']:
                     match_priority = MATCH_PRIORITIES['partial_clean']
                     similarity_score = similarity
                     logger.debug(f"Partial clean match: '{product_name}' (similarity: {similarity:.2f})")

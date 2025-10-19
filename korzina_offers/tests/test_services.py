@@ -88,18 +88,15 @@ class TestProductService:
 class TestShopSearchService:
     """Тесты для ShopSearchService"""
     
-    @patch('app.database.client.db_client.get_all_products')
-    @patch('app.database.client.db_client.get_all_prices_with_details')
-    def test_find_cheapest_shop_success(self, mock_prices, mock_products):
+    @patch('app.database.client.db_client.get_all_offers')
+    def test_find_cheapest_shop_success(self, mock_offers):
         """Тест успешного поиска магазина"""
-        mock_products.return_value = []
-        mock_prices.return_value = [
+        mock_offers.return_value = [
             {
-                "shop_id": "1",
-                "shops": {"name": "Test Shop"},
-                "product_id": "1",
-                "products": {"name": "Яблоки"},
-                "price": 50.0
+                "offer_id": 1,
+                "title": "Яблоки",
+                "seller_name": "Test Shop",
+                "price": 50
             }
         ]
         
@@ -113,18 +110,15 @@ class TestShopSearchService:
         assert result.total_price == 50.0
         assert result.products_found_count == 1
     
-    @patch('app.database.client.db_client.get_all_products')
-    @patch('app.database.client.db_client.get_all_prices_with_details')
-    def test_find_cheapest_shop_no_results(self, mock_prices, mock_products):
+    @patch('app.database.client.db_client.get_all_offers')
+    def test_find_cheapest_shop_no_results(self, mock_offers):
         """Тест поиска без результатов"""
-        mock_products.return_value = []
-        mock_prices.return_value = [
+        mock_offers.return_value = [
             {
-                "shop_id": "1",
-                "shops": {"name": "Test Shop"},
-                "product_id": "1",
-                "products": {"name": "Бананы"},
-                "price": 50.0
+                "offer_id": 1,
+                "title": "Бананы",
+                "seller_name": "Test Shop",
+                "price": 50
             }
         ]
         

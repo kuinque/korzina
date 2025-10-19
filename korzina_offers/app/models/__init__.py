@@ -6,6 +6,20 @@ from enum import Enum
 from pydantic import BaseModel, Field, field_validator
 
 
+class Offer(BaseModel):
+    """Модель предложения (offer) из базы данных"""
+    offer_id: int
+    title: str
+    description: Optional[str] = None
+    price: Optional[int] = None
+    currency: Optional[str] = None
+    images: Optional[List[str]] = None
+    category_id: Optional[int] = None
+    category_name: Optional[str] = None
+    tags: Optional[List[str]] = None
+    seller_name: Optional[str] = None
+
+
 class MatchType(str, Enum):
     """Типы сопоставления товаров"""
     EXACT_FULL = "exact_full"
@@ -23,6 +37,7 @@ class ProductMatch(BaseModel):
     similarity: float
     match_type: MatchType
     product_id: Optional[str] = None
+    offer_data: Optional[Dict[str, Any]] = None  # Полные данные оффера из БД
 
     class Config:
         use_enum_values = True

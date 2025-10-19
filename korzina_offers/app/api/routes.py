@@ -25,8 +25,9 @@ router = APIRouter(prefix="/api", tags=["api"])
 shop_search_service = ShopSearchService()
 
 
-@router.get(
+@router.api_route(
     "/health",
+    methods=["GET", "POST"],
     response_model=HealthResponse,
     summary="Проверка работы сервера",
     description="Health check endpoint для проверки состояния сервера и подключения к базе данных"
@@ -63,19 +64,19 @@ async def health_check() -> HealthResponse:
     "/stats",
     response_model=StatsResponse,
     summary="Статистика базы данных",
-    description="Получить статистику о количестве магазинов и товаров в базе данных"
+    description="Получить статистику о количестве продавцов и предложений в базе данных"
 )
 async def get_stats() -> StatsResponse:
     """Получить статистику базы данных"""
     try:
-        shops = db_client.get_shops()
-        products = db_client.get_all_products()
+        sellers = db_client.get_unique_sellers()
+        offers = db_client.get_all_offers()
         
         return StatsResponse(
             status="success",
-            shops_count=len(shops),
-            products_count=len(products),
-            shops=[shop["name"] for shop in shops[:10]]
+            shops_count=len(sellers),
+            products_count=len(offers),
+            shops=sellers[:10]
         )
         
     except Exception as e:
@@ -88,14 +89,14 @@ async def get_stats() -> StatsResponse:
 
 @router.get(
     "/products",
-    summary="Получить товары магазина",
-    description="Получить список товаров для конкретного магазина с опциональным поиском"
+    summary="Получить предложения продавца",
+    description="Получить список предложений для конкретного продавца с опциональным поиском"
 )
 async def get_products(
-    shop: str = Query(..., description="Название магазина"),
+    shop: str = Query(..., description="Название продавца"),
     q: Optional[str] = Query(None, description="Поисковый запрос")
 ):
-    """Получить товары для конкретного магазина с опциональным поиском"""
+    """Получить предложения для конкретного продавца с опциональным поиском"""
     try:
         if not shop.strip():
             raise HTTPException(
@@ -103,35 +104,36 @@ async def get_products(
                 detail="Missing 'shop' parameter"
             )
 
-        shop_obj = db_client.get_shop_by_name(shop)
-        if not shop_obj:
+        seller_info = db_client.get_seller_info(shop)
+        if not seller_info:
             raise HTTPException(
                 status_code=404,
-                detail="Shop not found"
+                detail="Seller not found"
             )
 
-        prices = db_client.get_prices_for_shop_with_details(shop_obj["id"])
+        offers = db_client.get_offers_by_seller(shop)
 
-        # Список уникальных товаров по продукту (если в ценах дубликаты)
-        products_map = {}
-        for price in prices:
-            product_id = price["product_id"]
-            product_name = price["products"]["name"]
-            product_price = price["price"]
-            if product_id not in products_map or product_price < products_map[product_id]["price"]:
-                products_map[product_id] = {"id": product_id, "name": product_name, "price": product_price}
-
-        products_list = list(products_map.values())
+        # Формируем список предложений
+        offers_list = []
+        for offer in offers:
+            offers_list.append({
+                "id": offer["offer_id"],
+                "name": offer.get("title", ""),
+                "price": offer.get("price", 0),
+                "description": offer.get("description"),
+                "category": offer.get("category_name"),
+                "images": offer.get("images", [])
+            })
 
         if q:
             qlower = q.lower()
-            products_list = [p for p in products_list if qlower in str(p["name"]).lower()]
+            offers_list = [o for o in offers_list if qlower in str(o["name"]).lower()]
 
         return {
             "status": "success",
-            "shop": {"id": shop_obj["id"], "name": shop_obj["name"]},
-            "count": len(products_list),
-            "products": products_list
+            "shop": {"id": seller_info["id"], "name": seller_info["name"]},
+            "count": len(offers_list),
+            "products": offers_list
         }
     except HTTPException:
         raise
@@ -172,7 +174,7 @@ async def search_products(request: SearchRequest) -> SearchResponse:
                         "found": p.found,
                         "price": p.price,
                         "similarity": p.similarity,
-                        "match_type": p.match_type.value
+                        "match_type": p.match_type if isinstance(p.match_type, str) else p.match_type.value
                     }
                     for p in result.found_products
                 ]
@@ -196,10 +198,11 @@ async def search_products(request: SearchRequest) -> SearchResponse:
 @router.get(
     "/search/get",
     summary="Поиск товаров (GET)",
-    description="GET версия endpoint поиска для тестирования"
+    description="GET версия endpoint поиска. По умолчанию возвращает JSON массив найденных офферов. С параметром debug=1 возвращает полную отладочную информацию"
 )
 async def search_products_get(
-    products: str = Query(..., description="Список товаров через запятую")
+    products: str = Query(..., description="Список товаров через запятую"),
+    debug: int = Query(0, description="Режим отладки: 0 - только офферы, 1 - полная информация с метаданными")
 ):
     """Поиск товаров (GET для тестов)"""
     try:
@@ -213,28 +216,36 @@ async def search_products_get(
         result = shop_search_service.find_cheapest_shop(search_request)
         
         if result:
-            return {
-                "status": "success",
-                "best_shop": result.shop_name,
-                "total_price": result.total_price,
-                "products_found": result.products_found_count,
-                "products_total": len(search_request.products),
-                "products": [
-                    {
-                        "target": p.target,
-                        "found": p.found,
-                        "price": p.price,
-                        "similarity": p.similarity,
-                        "match_type": p.match_type.value
-                    }
-                    for p in result.found_products
-                ]
-            }
+            # Режим отладки - полная информация
+            if debug == 1:
+                return {
+                    "status": "success",
+                    "best_shop": result.shop_name,
+                    "total_price": result.total_price,
+                    "products_found": result.products_found_count,
+                    "products_total": len(search_request.products),
+                    "match_percentage": result.match_percentage,
+                    "products": [
+                        {
+                            "target": p.target,
+                            "found": p.found,
+                            "price": p.price,
+                            "similarity": p.similarity,
+                            "match_type": p.match_type if isinstance(p.match_type, str) else p.match_type.value
+                        }
+                        for p in result.found_products
+                    ]
+                }
+            
+            # По умолчанию - только полные данные офферов из БД
+            found_offers = []
+            for p in result.found_products:
+                if p.found != "НЕ НАЙДЕН" and p.offer_data:
+                    found_offers.append(p.offer_data)
+            return found_offers
         else:
-            raise HTTPException(
-                status_code=404,
-                detail="No suitable shops found"
-            )
+            # Если ничего не найдено - возвращаем пустой массив
+            return []
             
     except HTTPException:
         raise
