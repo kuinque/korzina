@@ -46,10 +46,22 @@ class TestHealthEndpoint:
     
     @patch('app.database.client.db_client.health_check')
     def test_health_check_success(self, mock_health_check, client):
-        """Тест успешной проверки здоровья"""
+        """Тест успешной проверки здоровья (GET)"""
         mock_health_check.return_value = True
         
         response = client.get('/api/health')
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data['status'] == 'success'
+        assert data['database'] == 'healthy'
+    
+    @patch('app.database.client.db_client.health_check')
+    def test_health_check_success_post(self, mock_health_check, client):
+        """Тест успешной проверки здоровья (POST)"""
+        mock_health_check.return_value = True
+        
+        response = client.post('/api/health')
         
         assert response.status_code == 200
         data = response.json()
@@ -71,12 +83,15 @@ class TestHealthEndpoint:
 class TestStatsEndpoint:
     """Тесты для endpoint /api/stats"""
     
-    @patch('app.database.client.db_client.get_shops')
-    @patch('app.database.client.db_client.get_all_products')
-    def test_get_stats_success(self, mock_products, mock_shops, client):
+    @patch('app.database.client.db_client.get_unique_sellers')
+    @patch('app.database.client.db_client.get_all_offers')
+    def test_get_stats_success(self, mock_offers, mock_sellers, client):
         """Тест успешного получения статистики"""
-        mock_shops.return_value = [{'name': 'Shop 1'}, {'name': 'Shop 2'}]
-        mock_products.return_value = [{'name': 'Product 1'}, {'name': 'Product 2'}]
+        mock_sellers.return_value = ['Seller 1', 'Seller 2']
+        mock_offers.return_value = [
+            {'offer_id': 1, 'title': 'Product 1'}, 
+            {'offer_id': 2, 'title': 'Product 2'}
+        ]
         
         response = client.get('/api/stats')
         
@@ -145,12 +160,25 @@ class TestSearchGetEndpoint:
     
     @patch('app.services.shop_search_service.ShopSearchService.find_cheapest_shop')
     def test_search_get_success(self, mock_find_shop, client, mock_shop_solution):
-        """Тест успешного GET поиска"""
+        """Тест успешного GET поиска (дефолтный режим - массив офферов)"""
         mock_find_shop.return_value = mock_shop_solution
         
         response = client.get('/api/search/get?products=яблоки')
         
         assert response.status_code == 200
         data = response.json()
+        # По умолчанию возвращается массив офферов
+        assert isinstance(data, list)
+    
+    @patch('app.services.shop_search_service.ShopSearchService.find_cheapest_shop')
+    def test_search_get_debug_mode(self, mock_find_shop, client, mock_shop_solution):
+        """Тест GET поиска в режиме отладки"""
+        mock_find_shop.return_value = mock_shop_solution
+        
+        response = client.get('/api/search/get?products=яблоки&debug=1')
+        
+        assert response.status_code == 200
+        data = response.json()
+        # В debug режиме возвращается полная информация
         assert data['status'] == 'success'
         assert data['best_shop'] == 'Test Shop'
