@@ -309,3 +309,78 @@ async def search_products_get(
             detail="Internal server error"
         )
 
+
+@router.post(
+    "/compare_prices",
+    summary="Сравнение цен по магазинам",
+    description="Находит магазин с самой дешевой корзиной и возвращает список товаров из этого магазина"
+)
+async def compare_prices(
+        offer_ids: list[str] = Query(..., description="Список ID офферов для сравнения")
+):
+    """Сравнить цены корзины и вернуть товары из самого дешевого магазина"""
+    try:
+        if not offer_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="Missing 'offer_ids' parameter"
+            )
+
+        # Получаем все офферы
+        all_offers = db_client.get_all_offers()
+
+        # Фильтруем нужные офферы
+        selected_offers = [
+            offer for offer in all_offers
+            if offer.get("offer_id") in offer_ids
+        ]
+
+        if not selected_offers:
+            raise HTTPException(
+                status_code=404,
+                detail="No offers found with provided IDs"
+            )
+
+        # Группируем по магазинам и считаем сумму
+        shop_totals = {}
+        shop_products = {}
+
+        for offer in selected_offers:
+            shop_name = offer.get("seller_name")
+            price = offer.get("price", 0)
+
+            if shop_name not in shop_totals:
+                shop_totals[shop_name] = 0
+                shop_products[shop_name] = []
+
+            shop_totals[shop_name] += price
+            shop_products[shop_name].append({
+                "id": offer.get("offer_id"),
+                "name": offer.get("title"),
+                "price": price,
+                "category": offer.get("category_name"),
+                "description": offer.get("description"),
+                "images": offer.get("images", [])
+            })
+
+        # Находим самый дешевый магазин
+        cheapest_shop = min(shop_totals.items(), key=lambda x: x[1])
+        cheapest_shop_name = cheapest_shop[0]
+        cheapest_total_price = cheapest_shop[1]
+
+        return {
+            "status": "success",
+            "shop_name": cheapest_shop_name,
+            "total_price": cheapest_total_price,
+            "products_count": len(shop_products[cheapest_shop_name]),
+            "products": shop_products[cheapest_shop_name]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Compare prices error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error"
+        )
