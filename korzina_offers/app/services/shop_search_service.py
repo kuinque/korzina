@@ -32,15 +32,17 @@ class ShopSearchService:
         try:
             # Получаем все предложения из БД
             all_offers = db_client.get_all_offers()
-            
+            # Получаем информацию об искомых товарах из БД
+            target_products_info = self._get_target_products_info(search_request.products, all_offers)
             # Группируем предложения по продавцам
             sellers_data = self._group_offers_by_sellers(all_offers)
             
             # Ищем лучшего продавца для каждого
             seller_solutions = []
-            
+
             for seller_name, seller_data in sellers_data.items():
-                solution = self._evaluate_seller(search_request.products, seller_name, seller_data)
+                solution = self._evaluate_seller(search_request.products, seller_name, seller_data,
+                                                 target_products_info)
                 seller_solutions.append(solution)
             
             # Сортируем по количеству найденных товаров и цене
@@ -92,18 +94,27 @@ class ShopSearchService:
         
         logger.debug(f"Grouped data for {len(sellers_data)} sellers")
         return sellers_data
-    
-    def _evaluate_seller(self, target_products: List[str], seller_name: str, seller_data: Dict[str, Any]) -> ShopSolution:
+
+    def _evaluate_seller(self, target_products: List[str], seller_name: str, seller_data: Dict[str, Any],
+                             target_products_info: Dict[str, Dict[str, Any]]) -> ShopSolution:
+
         """Оценить продавца для списка товаров"""
         total_price = 0
         found_products = []
         used_offer_ids = set()
         
         logger.debug(f"Evaluating seller: {seller_data['name']}")
-        
+
         for target_product in target_products:
+            # Получаем информацию об искомом товаре
+            product_info = target_products_info.get(target_product, {})
+
             offer_id, offer_data, similarity, match_type = self.product_service.find_best_product_match(
-                target_product, seller_data["offers"], used_offer_ids
+                target_product,
+                seller_data["offers"],
+                used_offer_ids,
+                target_category=product_info.get("category"),
+                target_price=product_info.get("price")
             )
             
             if offer_id:
@@ -142,3 +153,37 @@ class ShopSearchService:
             match_percentage=match_percentage,
             products_found_count=products_found_count
         )
+
+    def _get_target_products_info(self, product_names: List[str], all_offers: List[Dict[str, Any]]) -> Dict[
+        str, Dict[str, Any]]:
+        """
+        Получить информацию об искомых товарах из БД
+
+        Args:
+            product_names: Список названий товаров от пользователя
+            all_offers: Все офферы из БД
+
+        Returns:
+            Словарь: {название_товара: {category, price}}
+        """
+        products_info = {}
+
+        for product_name in product_names:
+            # Ищем этот товар в БД по точному совпадению названия
+            for offer in all_offers:
+                if offer.get("title", "").lower() == product_name.lower():
+                    products_info[product_name] = {
+                        "category": offer.get("category_name"),
+                        "price": offer.get("price")
+                    }
+                    break  # Нашли - выходим
+
+            # Если не нашли точного совпадения - оставляем None
+            if product_name not in products_info:
+                products_info[product_name] = {
+                    "category": None,
+                    "price": None
+                }
+                logger.warning(f"Product '{product_name}' not found in database")
+
+        return products_info
