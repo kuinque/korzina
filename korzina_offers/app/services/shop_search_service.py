@@ -85,6 +85,8 @@ class ShopSearchService:
                 "name": title,
                 "price": price if price else 0,
                 "clean_name": self.product_service.remove_stop_words(title),
+                "category": offer.get("category_name", ""),
+
                 "offer_data": offer  # сохраняем полные данные предложения
             }
         
