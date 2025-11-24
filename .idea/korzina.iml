@@ -6,13 +6,13 @@
       <sourceFolder url="file://$MODULE_DIR$/KorzinaApp" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/Korzina_WebScraping" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/korzina_offers" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/korzina_offers/app" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/korzina_offers/app/api" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/korzina_offers/app/core" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/korzina_offers/app/database" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/korzina_offers/app/models" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/korzina_offers/app/services" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/korzina_offers/tests" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/korzina_offers/app" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/korzina_offers/app/api" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/korzina_offers/htmlcov" />
       <excludeFolder url="file://$MODULE_DIR$/venv/Lib" />
       <excludeFolder url="file://$MODULE_DIR$/venv/Scripts" />
