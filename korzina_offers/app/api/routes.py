@@ -13,7 +13,7 @@ from app.models import (
     ProductMatch
 )
 from app.services.shop_search_service import ShopSearchService
-from app.database.client import db_client
+from app.database.client import cache_manager
 from app.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -35,7 +35,7 @@ shop_search_service = ShopSearchService()
 async def health_check() -> HealthResponse:
     """Проверка работы сервера"""
     try:
-        db_healthy = db_client.health_check()
+        db_healthy = cache_manager.health_check()
         
         if db_healthy:
             return HealthResponse(
@@ -69,8 +69,8 @@ async def health_check() -> HealthResponse:
 async def get_stats() -> StatsResponse:
     """Получить статистику базы данных"""
     try:
-        sellers = db_client.get_unique_sellers()
-        offers = db_client.get_all_offers()
+        sellers = cache_manager.get_unique_sellers()
+        offers = cache_manager.get_all_offers()
         
         return StatsResponse(
             status="success",
@@ -102,7 +102,7 @@ async def get_offers(
     """Получить список офферов с пагинацией"""
     try:
         # Получаем все офферы
-        all_offers = db_client.get_all_offers()
+        all_offers = cache_manager.get_all_offers()
         
         # Применяем фильтры
         filtered_offers = all_offers
@@ -157,14 +157,14 @@ async def get_products(
                 detail="Missing 'shop' parameter"
             )
 
-        seller_info = db_client.get_seller_info(shop)
+        seller_info = cache_manager.get_seller_info(shop)
         if not seller_info:
             raise HTTPException(
                 status_code=404,
                 detail="Seller not found"
             )
 
-        offers = db_client.get_offers_by_seller(shop)
+        offers = cache_manager.get_offers_by_seller(shop)
 
         # Формируем список предложений
         offers_list = []
@@ -327,7 +327,7 @@ async def compare_prices(
             )
 
         # Получаем все офферы
-        all_offers = db_client.get_all_offers()
+        all_offers = cache_manager.get_all_offers()
 
         # Фильтруем нужные офферы
         selected_offers = [
@@ -380,6 +380,60 @@ async def compare_prices(
         raise
     except Exception as e:
         logger.error(f"Compare prices error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error"
+        )
+
+
+@router.get(
+    "/cache/info",
+    summary="Информация о кэше",
+    description="Получить информацию о состоянии кэша в памяти"
+)
+async def get_cache_info():
+    """Получить информацию о состоянии кэша"""
+    try:
+        cache_info = cache_manager.get_cache_info()
+        return {
+            "status": "success",
+            **cache_info
+        }
+    except Exception as e:
+        logger.error(f"Error getting cache info: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error"
+        )
+
+
+@router.post(
+    "/cache/refresh",
+    summary="Обновить кэш",
+    description="Принудительно обновить кэш, загрузив данные из базы данных"
+)
+async def refresh_cache():
+    """Обновить кэш"""
+    try:
+        logger.info("Manual cache refresh requested")
+        success = cache_manager.refresh_cache()
+        
+        if success:
+            cache_info = cache_manager.get_cache_info()
+            return {
+                "status": "success",
+                "message": "Cache refreshed successfully",
+                **cache_info
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to refresh cache"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error refreshing cache: {e}")
         raise HTTPException(
             status_code=500,
             detail="Internal server error"
