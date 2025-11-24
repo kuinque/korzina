@@ -3,7 +3,7 @@
 """
 from typing import List, Dict, Any, Optional, Tuple
 from difflib import SequenceMatcher
-from app.core.constants import STOP_WORDS, MATCH_PRIORITIES, SIMILARITY_THRESHOLDS
+from app.core.constants import STOP_WORDS, MATCH_PRIORITIES, SIMILARITY_THRESHOLDS, PRICE_TOLERANCE, SIMILARITY_WEIGHTS
 from app.models import ProductMatch, MatchType
 from app.core.logger import get_logger
 
@@ -19,30 +19,89 @@ class ProductService:
         words = text.lower().split()
         filtered_words = [word for word in words if word not in STOP_WORDS]
         return ' '.join(filtered_words)
-    
+
+    @staticmethod
+    def calculate_category_similarity(target_category: Optional[str], product_category: str) -> float:
+        """
+        Рассчитать схожесть категорий
+
+        Args:
+            target_category: Целевая категория (может быть None)
+            product_category: Категория товара из БД
+
+        Returns:
+            float: Оценка от 0 до 1
+        """
+        if target_category is None:
+            return 0.5  # Нейтральная оценка, если категория не указана
+
+        if target_category.lower() == product_category.lower():
+            return 1.0  # Точное совпадение категорий
+
+        # Проверяем, есть ли общие слова в названиях категорий
+        # Например: "Фрукты" и "Свежие фрукты"
+        target_words = set(target_category.lower().split())
+        product_words = set(product_category.lower().split())
+
+        if target_words & product_words:  # Есть пересечение (общие слова)
+            return 0.7  # Частичное совпадение
+
+        return 0.0  # Совершенно разные категории
+
+    @staticmethod
+    def calculate_price_similarity(target_price: Optional[float], product_price: float) -> float:
+        """
+        Рассчитать схожесть цен
+
+        Args:
+            target_price: Целевая цена (может быть None)
+            product_price: Цена товара из БД
+
+        Returns:
+            float: Оценка от 0 до 1
+        """
+        if target_price is None or target_price <= 0:
+            return 0.5  # Нейтральная оценка, если цена не указана
+
+        # Рассчитываем относительное отклонение цены в процентах
+        price_diff = abs(target_price - product_price) / target_price
+
+        if price_diff <= PRICE_TOLERANCE:
+            # Линейная функция: чем ближе цена, тем выше оценка
+            # При 0% отклонения = 1.0, при 30% отклонения = 0.0
+            return 1.0 - (price_diff / PRICE_TOLERANCE)
+
+        return 0.0  # Цена отличается больше чем на 30%
+
     @staticmethod
     def find_best_product_match(
-        target_product: str, 
-        shop_products: Dict[str, Dict[str, Any]], 
-        used_products: set
+            target_product: str,
+            shop_products: Dict[str, Dict[str, Any]],
+            used_products: set,
+            target_category: Optional[str] = None,
+            target_price: Optional[float] = None
     ) -> Tuple[Optional[str], Optional[Dict[str, Any]], float, MatchType]:
         """
         Найти лучшее сопоставление товара в магазине
-        
+
         Args:
             target_product: Искомый товар
             shop_products: Товары магазина
             used_products: Уже использованные товары
-            
+            target_category: Целевая категория товара (опционально)
+            target_price: Целевая цена товара (опционально)
+
         Returns:
             Tuple: (product_id, product_data, similarity_score, match_type)
         """
         best_match = None
+        best_combined_score = 0
         best_similarity = 0
         best_priority = 0
         target_clean = ProductService.remove_stop_words(target_product)
         
         logger.debug(f"Searching for product: '{target_product}' (clean: '{target_clean}')")
+        logger.debug(f"Target category: {target_category}, Target price: {target_price}")
         logger.debug(f"Available products count: {len(shop_products)}")
         
         for product_id, product_data in shop_products.items():
@@ -51,11 +110,14 @@ class ProductService:
             
             product_name = product_data["name"]
             product_clean = product_data["clean_name"]
+            product_category = product_data.get("category", "")
+            product_price = product_data["price"]
             match_priority = 0
             similarity_score = 0
-            
-            logger.debug(f"Checking product: id={product_id}, name='{product_name}', clean='{product_clean}'")
-            
+
+            logger.debug(
+                f"Checking product: id={product_id}, name='{product_name}', clean='{product_clean}', category='{product_category}', price={product_price}")
+
             # 1. ТОЧНОЕ СОВПАДЕНИЕ (полное, с учетом стоп-слов)
             if target_product.lower() == product_name.lower():
                 match_priority = MATCH_PRIORITIES['exact_full']
@@ -95,22 +157,36 @@ class ProductService:
                     match_priority = MATCH_PRIORITIES['partial_clean']
                     similarity_score = similarity
                     logger.debug(f"Partial clean match: '{product_name}' (similarity: {similarity:.2f})")
-            
-            # Если нашли совпадение, выбираем лучший вариант
+
+            # Если нашли совпадение, рассчитываем итоговую оценку
             if match_priority > 0:
-                # Для точного совпадения возвращаем оригинальную схожесть
-                if match_priority == MATCH_PRIORITIES['exact_full']:
-                    final_similarity = 1.0
-                else:
-                    final_similarity = similarity_score
-                
-                # Комбинированная оценка: приоритет + схожесть + цена
-                price_factor = 1 / (product_data["price"] + 0.1) * 0.1
-                combined_score = match_priority * 10 + final_similarity + price_factor
-                
-                if best_match is None or combined_score > best_similarity:
+                # Нормализуем текстовую схожесть от 0 до 1
+                # Приоритет делим на максимальный (4), умножаем на схожесть
+                text_similarity = (match_priority / MATCH_PRIORITIES['exact_full']) * similarity_score
+
+                # Рассчитываем схожесть по категории и цене
+                category_similarity = ProductService.calculate_category_similarity(
+                    target_category, product_category
+                )
+                price_similarity = ProductService.calculate_price_similarity(
+                    target_price, product_price
+                )
+
+                # Итоговая оценка с учётом весов
+                combined_score = (
+                        SIMILARITY_WEIGHTS['text_match'] * text_similarity +
+                        SIMILARITY_WEIGHTS['category_match'] * category_similarity +
+                        SIMILARITY_WEIGHTS['price_proximity'] * price_similarity
+                )
+
+                logger.debug(f"Scores for '{product_name}': text={text_similarity:.2f}, "
+                             f"category={category_similarity:.2f}, price={price_similarity:.2f}, "
+                             f"combined={combined_score:.2f}")
+
+                if best_match is None or combined_score > best_combined_score:
                     best_match = (product_id, product_data)
-                    best_similarity = final_similarity  # Возвращаем оригинальную схожесть
+                    best_combined_score = combined_score
+                    best_text_similarity = similarity_score
                     best_priority = match_priority
         
         if best_match:
@@ -122,9 +198,11 @@ class ProductService:
                 if best_priority == priority:
                     match_type = MatchType(match_type_name)
                     break
-            
-            logger.info(f"Best match found: '{product_data['name']}' (type: {match_type.value}, score: {best_similarity:.2f})")
-            return product_id, product_data, best_similarity, match_type
+
+            logger.info(f"Best match found: '{product_data['name']}' "
+                        f"(type: {match_type.value}, text_score: {best_text_similarity:.2f}, "
+                        f"combined_score: {best_combined_score:.2f})")
+            return product_id, product_data, best_text_similarity, match_type
         
         logger.warning(f"No match found for product: '{target_product}'")
         return None, None, 0, MatchType.NONE
