@@ -55,13 +55,89 @@ uvicorn main:app --reload
 
 ## 🐳 Docker
 
-### Сборка и запуск
+> 📖 **Подробная инструкция**: См. [DOCKER.md](DOCKER.md) для детального руководства по запуску и управлению Docker контейнером.
+
+### Быстрый запуск
+
+#### Способ 1: Используя скрипт (рекомендуется)
 ```bash
+./docker-start.sh
+```
+
+#### Способ 2: Используя docker compose
+```bash
+# Сборка и запуск
+make docker-up
+# или
+docker compose up -d
+
+# Просмотр логов
+make docker-logs
+# или
+docker compose logs -f
+
+# Остановка
+make docker-down
+# или
+docker compose down
+```
+
+#### Способ 3: Используя docker напрямую
+```bash
+# Сборка образа
 make docker-build
 # или
 docker build -t korzina-api .
-docker run -p 5000:5000 --env-file .env korzina-api
+
+# Запуск контейнера
+docker run -d \
+  --name korzina-offers-api \
+  -p 5000:5000 \
+  --env-file .env \
+  --restart unless-stopped \
+  korzina-api
 ```
+
+### Доступ к API
+
+После запуска контейнера API будет доступен:
+
+- **Локально**: `http://localhost:5000`
+- **По IP машины**: `http://<IP_МАШИНЫ>:5000`
+  - Узнать IP: `hostname -I | awk '{print $1}'`
+  - Пример: `http://10.128.0.32:5000`
+
+- **Документация**:
+  - Swagger UI: `http://<IP>:5000/docs`
+  - ReDoc: `http://<IP>:5000/redoc`
+
+### Полезные команды
+
+```bash
+# Пересобрать и перезапустить
+make docker-rebuild
+
+# Перезапустить контейнер
+make docker-restart
+
+# Просмотр логов
+make docker-logs
+
+# Остановить контейнер
+make docker-down
+
+# Проверка статуса
+docker compose ps
+```
+
+### Требования
+
+- Docker и Docker Compose установлены
+- Файл `.env` с переменными окружения:
+  ```
+  SUPABASE_URL=your_supabase_url
+  SUPABASE_KEY=your_supabase_key
+  ```
 
 ## 📚 API Endpoints
 
