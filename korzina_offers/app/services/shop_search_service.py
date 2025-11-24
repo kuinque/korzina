@@ -2,7 +2,7 @@
 Сервис для поиска магазинов
 """
 from typing import List, Dict, Any, Optional
-from app.database.client import db_client
+from app.database.client import cache_manager
 from app.services.product_service import ProductService
 from app.models import ShopSolution, ProductMatch, SearchRequest, MatchType
 from app.config import config
@@ -30,10 +30,10 @@ class ShopSearchService:
         logger.info(f"Starting search for products: {', '.join(search_request.products)}")
         
         try:
-            # Получаем все предложения из БД
-            all_offers = db_client.get_all_offers()
-            # Получаем информацию об искомых товарах из БД
+            # Получаем все предложения из кэша
+            all_offers = cache_manager.get_all_offers()
             target_products_info = self._get_target_products_info(search_request.products, all_offers)
+            
             # Группируем предложения по продавцам
             sellers_data = self._group_offers_by_sellers(all_offers)
             

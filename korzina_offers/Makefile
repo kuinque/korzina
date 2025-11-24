@@ -1,6 +1,6 @@
 # Makefile для управления проектом
 
-.PHONY: help install test lint format run docker-build docker-run clean
+.PHONY: help install test lint format run docker-build docker-run docker-up docker-down docker-logs docker-restart clean
 
 help: ## Показать справку
 	@echo "Доступные команды:"
@@ -28,8 +28,23 @@ run: ## Запустить приложение
 docker-build: ## Собрать Docker образ
 	docker build -t korzina-api .
 
-docker-run: ## Запустить в Docker
+docker-run: ## Запустить в Docker (старый способ)
 	docker run -p 5000:5000 --env-file .env korzina-api
+
+docker-up: ## Запустить контейнер через docker compose
+	docker compose up -d
+
+docker-down: ## Остановить контейнер через docker compose
+	docker compose down
+
+docker-logs: ## Показать логи контейнера
+	docker compose logs -f
+
+docker-restart: ## Перезапустить контейнер
+	docker compose restart
+
+docker-rebuild: ## Пересобрать и перезапустить контейнер
+	docker compose up -d --build
 
 clean: ## Очистить временные файлы
 	find . -type f -name "*.pyc" -delete
