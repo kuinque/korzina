@@ -162,23 +162,16 @@ class ShopSearchService:
 
     def _get_target_products_info(self, product_names: List[str], all_offers: List[Dict[str, Any]]) -> Dict[
         str, Dict[str, Any]]:
-        """
-        Получить информацию об искомых товарах из БД
-
-        Args:
-            product_names: Список названий товаров от пользователя
-            all_offers: Все офферы из БД
-
-        Returns:
-            Словарь: {название_товара: {category, price}}
-        """
+        """Получить информацию об искомых товарах из БД"""
         products_info = {}
 
         for product_name in product_names:
-            # Ищем этот товар в БД по точному совпадению названия
+            product_name_lower = product_name.lower()
+
+            # ИСПРАВЛЕНИЕ: Ищем по вхождению подстроки, а не точному совпадению
             for offer in all_offers:
-                if offer.get("title", "").lower() == product_name.lower():
-                    # ИСПРАВЛЕНИЕ: Преобразуем цену в число
+                title = offer.get("title", "").lower()
+                if product_name_lower in title:  # <-- ЗДЕСЬ ИЗМЕНЕНИЕ
                     price_raw = offer.get("price")
                     try:
                         price = float(price_raw) if price_raw else None
@@ -190,9 +183,8 @@ class ShopSearchService:
                         "category": offer.get("category_name"),
                         "price": price
                     }
-                    break
+                    break  # Берём первое найденное совпадение
 
-            # Если не нашли точного совпадения - оставляем None
             if product_name not in products_info:
                 products_info[product_name] = {
                     "category": None,
