@@ -44,7 +44,7 @@ def mock_shop_solution():
 class TestHealthEndpoint:
     """Тесты для endpoint /api/health"""
     
-    @patch('app.database.client.db_client.health_check')
+    @patch('app.database.client.cache_manager.health_check')
     def test_health_check_success(self, mock_health_check, client):
         """Тест успешной проверки здоровья (GET)"""
         mock_health_check.return_value = True
@@ -56,7 +56,7 @@ class TestHealthEndpoint:
         assert data['status'] == 'success'
         assert data['database'] == 'healthy'
     
-    @patch('app.database.client.db_client.health_check')
+    @patch('app.database.client.cache_manager.health_check')
     def test_health_check_success_post(self, mock_health_check, client):
         """Тест успешной проверки здоровья (POST)"""
         mock_health_check.return_value = True
@@ -68,7 +68,7 @@ class TestHealthEndpoint:
         assert data['status'] == 'success'
         assert data['database'] == 'healthy'
     
-    @patch('app.database.client.db_client.health_check')
+    @patch('app.database.client.cache_manager.health_check')
     def test_health_check_failure(self, mock_health_check, client):
         """Тест неудачной проверки здоровья"""
         mock_health_check.return_value = False
@@ -83,8 +83,8 @@ class TestHealthEndpoint:
 class TestStatsEndpoint:
     """Тесты для endpoint /api/stats"""
     
-    @patch('app.database.client.db_client.get_unique_sellers')
-    @patch('app.database.client.db_client.get_all_offers')
+    @patch('app.database.client.cache_manager.get_unique_sellers')
+    @patch('app.database.client.cache_manager.get_all_offers')
     def test_get_stats_success(self, mock_offers, mock_sellers, client):
         """Тест успешного получения статистики"""
         mock_sellers.return_value = ['Seller 1', 'Seller 2']
@@ -105,7 +105,7 @@ class TestStatsEndpoint:
 class TestOffersEndpoint:
     """Тесты для endpoint /api/offers"""
     
-    @patch('app.database.client.db_client.get_all_offers')
+    @patch('app.database.client.cache_manager.get_all_offers')
     def test_get_offers_default(self, mock_offers, client):
         """Тест получения офферов с дефолтными параметрами"""
         mock_offers.return_value = [
@@ -123,7 +123,7 @@ class TestOffersEndpoint:
         assert data['count'] == 20
         assert len(data['offers']) == 20
     
-    @patch('app.database.client.db_client.get_all_offers')
+    @patch('app.database.client.cache_manager.get_all_offers')
     def test_get_offers_pagination(self, mock_offers, client):
         """Тест пагинации офферов"""
         mock_offers.return_value = [
@@ -141,7 +141,7 @@ class TestOffersEndpoint:
         assert data['count'] == 5
         assert len(data['offers']) == 5
     
-    @patch('app.database.client.db_client.get_all_offers')
+    @patch('app.database.client.cache_manager.get_all_offers')
     def test_get_offers_filter_by_seller(self, mock_offers, client):
         """Тест фильтрации по продавцу"""
         mock_offers.return_value = [
@@ -239,3 +239,65 @@ class TestSearchGetEndpoint:
         # В debug режиме возвращается полная информация
         assert data['status'] == 'success'
         assert data['best_shop'] == 'Test Shop'
+
+
+class TestAllAlternativesEndpoint:
+    """Тесты для endpoint /api/all_alternatives"""
+
+    @patch('app.database.client.cache_manager.get_all_offers')
+    def test_all_alternatives_success(self, mock_offers, client):
+        """Тест успешного получения альтернатив"""
+        mock_offers.return_value = [
+            {"offer_id": 1, "title": "Яблоки", "seller_name": "Shop A", "price": 100, "category_name": "Фрукты"},
+            {"offer_id": 2, "title": "Бананы", "seller_name": "Shop A", "price": 80, "category_name": "Фрукты"},
+            {"offer_id": 3, "title": "Яблоки", "seller_name": "Shop B", "price": 90, "category_name": "Фрукты"},
+            {"offer_id": 4, "title": "Бананы", "seller_name": "Shop B", "price": 70, "category_name": "Фрукты"},
+        ]
+
+        response = client.post('/api/all_alternatives', json={'offer_ids': [1, 2]})
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['status'] == 'success'
+        assert data['request_count'] == 2
+        assert data['total_shops'] == 2
+        assert len(data['shops']) == 2
+        for shop_name, offers in data['shops'].items():
+            assert len(offers) == 2
+            for match in offers:
+                assert match['target_offer_id'] in [1, 2]
+                assert match['matched_offer'] is not None
+
+    @patch('app.database.client.cache_manager.get_all_offers')
+    def test_all_alternatives_missing_offer(self, mock_offers, client):
+        """Тест запроса с отсутствующим оффером"""
+        mock_offers.return_value = [
+            {"offer_id": 1, "title": "Яблоки", "seller_name": "Shop A", "price": 100, "category_name": "Фрукты"},
+        ]
+
+        response = client.post('/api/all_alternatives', json={'offer_ids': [2]})
+
+        assert response.status_code == 404
+        data = response.json()
+        assert 'detail' in data
+        assert 'Offers not found' in data['detail']
+
+    @patch('app.database.client.cache_manager.get_all_offers')
+    def test_all_alternatives_returns_empty_offer_when_no_match(self, mock_offers, client):
+        """Тест возвращает пустой оффер, если альтернативы не найдены"""
+        mock_offers.return_value = [
+            {"offer_id": 1, "title": "Арбузик 123", "seller_name": "Shop A", "price": 100, "category_name": "Фрукты"},
+            {"offer_id": 2, "title": "Совсем другое название", "seller_name": "Shop B", "price": 120, "category_name": "Овощи"},
+        ]
+
+        response = client.post('/api/all_alternatives', json={'offer_ids': [1]})
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['status'] == 'success'
+        for shop_name, offers in data['shops'].items():
+            assert len(offers) == 1
+            match = offers[0]
+            assert match['matched_offer'] is not None
+            if match['matched_offer']['offer_id'] is None:
+                assert match['matched_offer']['seller_name'] == shop_name

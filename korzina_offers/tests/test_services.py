@@ -88,7 +88,7 @@ class TestProductService:
 class TestShopSearchService:
     """Тесты для ShopSearchService"""
     
-    @patch('app.database.client.db_client.get_all_offers')
+    @patch('app.database.client.cache_manager.get_all_offers')
     def test_find_cheapest_shop_success(self, mock_offers):
         """Тест успешного поиска магазина"""
         mock_offers.return_value = [
@@ -110,7 +110,7 @@ class TestShopSearchService:
         assert result.total_price == 50.0
         assert result.products_found_count == 1
     
-    @patch('app.database.client.db_client.get_all_offers')
+    @patch('app.database.client.cache_manager.get_all_offers')
     def test_find_cheapest_shop_no_results(self, mock_offers):
         """Тест поиска без результатов"""
         mock_offers.return_value = [
