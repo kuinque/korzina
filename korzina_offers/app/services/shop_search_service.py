@@ -63,6 +63,96 @@ class ShopSearchService:
             logger.error(f"Error in seller search: {e}")
             raise
 
+    #TODO: Разобраться в чем проблема
+    def find_alternatives_for_offers(self, offer_ids: List[int]) -> List[Dict[str, Any]]:
+        """
+        Найти альтернативные предложения для списка офферов по всем магазинам
+
+        Args:
+            offer_ids: Список ID исходных офферов
+
+        Returns:
+            Список с альтернативами по магазинам
+        """
+        logger.info(f"Searching alternatives for offers: {offer_ids}")
+
+        all_offers = cache_manager.get_all_offers()
+        selected_offers_map: Dict[int, Dict[str, Any]] = {}
+        for offer in all_offers:
+            offer_id = offer.get("offer_id")
+            if offer_id in offer_ids and offer_id not in selected_offers_map:
+                selected_offers_map[offer_id] = offer
+
+        missing_ids = [offer_id for offer_id in offer_ids if offer_id not in selected_offers_map]
+        if missing_ids:
+            raise ValueError(f"Offers not found: {missing_ids}")
+
+        target_offers = [
+            selected_offers_map[offer_id]
+            for offer_id in offer_ids
+            if offer_id in selected_offers_map
+        ]
+        sellers_data = self._group_offers_by_sellers(all_offers)
+
+        # Подготовим структуры для накопления результатов в порядке магазинов
+        shop_results: Dict[str, Dict[str, Any]] = {
+            seller_name: {
+                "shop_name": seller_data["name"],
+                "matches": []
+            }
+            for seller_name, seller_data in sellers_data.items()
+        }
+
+        ordered_sellers = sorted(sellers_data.keys())
+
+        # Идём по списку искомых офферов и находим альтернативы в каждом магазине
+        for target in target_offers:
+            target_title = target.get("title", "")
+            target_category = target.get("category_name")
+            target_price = self._normalize_price(target.get("price"))
+            target_id = target.get("offer_id")
+
+            for seller_name in ordered_sellers:
+                seller_data = sellers_data[seller_name]
+                offer_id, offer_data, similarity, match_type = self.product_service.find_best_product_match(
+                    target_product=target_title,
+                    shop_products=seller_data["offers"],
+                    used_products=set(),  # Каждый оффер рассматривается независимо
+                    target_category=target_category,
+                    target_price=target_price
+                )
+
+                if offer_id and offer_data:
+                    matched_offer = offer_data.get("offer_data") or {
+                        "offer_id": offer_id,
+                        "title": offer_data.get("name"),
+                        "description": None,
+                        "price": offer_data.get("price"),
+                        "currency": None,
+                        "category_name": offer_data.get("category"),
+                        "seller_name": seller_data["name"],
+                        "images": []
+                    }
+                else:
+                    similarity = 0.0
+                    match_type = MatchType.NONE
+                    matched_offer = self._build_empty_offer(seller_data["name"])
+
+                shop_results[seller_name]["matches"].append({
+                    "target_offer_id": target_id,
+                    "target_title": target_title,
+                    "similarity": similarity,
+                    "match_type": match_type,
+                    "matched_offer": matched_offer
+                })
+
+        alternatives = {
+            shop_results[name]["shop_name"]: shop_results[name]["matches"]
+            for name in ordered_sellers
+        }
+        logger.info(f"Alternatives calculated for {len(alternatives)} shops")
+        return alternatives
+
     def _group_offers_by_sellers(self, all_offers: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         """Группировать предложения по продавцам"""
         sellers_data = {}
@@ -193,3 +283,29 @@ class ShopSearchService:
                 logger.warning(f"Product '{product_name}' not found in database")
 
         return products_info
+
+    @staticmethod
+    def _normalize_price(price: Any) -> Optional[float]:
+        """Преобразовать цену к float при необходимости"""
+        if price is None:
+            return None
+        try:
+            numeric_price = float(price)
+            return numeric_price if numeric_price >= 0 else None
+        except (TypeError, ValueError):
+            logger.warning(f"Unable to normalize price value: {price}")
+            return None
+
+    @staticmethod
+    def _build_empty_offer(shop_name: str) -> Dict[str, Any]:
+        """Вернуть шаблон пустого оффера"""
+        return {
+            "offer_id": None,
+            "title": None,
+            "description": None,
+            "price": None,
+            "currency": None,
+            "category_name": None,
+            "seller_name": shop_name,
+            "images": []
+        }

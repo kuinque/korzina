@@ -112,3 +112,40 @@ class ErrorResponse(BaseModel):
     """Ответ с ошибкой"""
     status: str = "error"
     message: str
+
+
+class AlternativesRequest(BaseModel):
+    """Запрос для поиска альтернатив по списку офферов"""
+    offer_ids: List[int] = Field(..., description="Список ID офферов", min_length=1)
+
+    @field_validator("offer_ids")
+    @classmethod
+    def validate_offer_ids(cls, value: List[int]) -> List[int]:
+        """Проверка списка офферов"""
+        if not value:
+            raise ValueError("offer_ids list cannot be empty")
+
+        normalized = []
+        for offer_id in value:
+            offer_int = int(offer_id)
+            if offer_int < 0:
+                raise ValueError("offer_ids must contain only positive values")
+            normalized.append(offer_int)
+        return normalized
+
+
+class AlternativeMatch(BaseModel):
+    """Результат поиска альтернатив для товара"""
+    target_offer_id: int
+    target_title: Optional[str]
+    match_type: MatchType = MatchType.NONE
+    similarity: float = 0.0
+    matched_offer: Optional[Dict[str, Any]] = None
+
+
+class AlternativesResponse(BaseModel):
+    """Ответ с альтернативами по магазинам"""
+    status: str = "success"
+    request_count: int
+    total_shops: int
+    shops: Dict[str, List[AlternativeMatch]]
