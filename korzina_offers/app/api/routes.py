@@ -101,24 +101,26 @@ async def get_offers(
 ):
     """Получить список офферов с пагинацией"""
     try:
-        # Получаем все офферы
         all_offers = cache_manager.get_all_offers()
-        
-        # Применяем фильтры
+        logger.info(f"Total offers: {len(all_offers)}")  # <-- ДОБАВИТЬ
+
         filtered_offers = all_offers
-        
+
         if seller:
             filtered_offers = [o for o in filtered_offers if o.get("seller_name") == seller]
-        
+            logger.info(f"After seller filter: {len(filtered_offers)}")  # <-- ДОБАВИТЬ
+
         if category:
             filtered_offers = [o for o in filtered_offers if o.get("category_name") == category]
-        
+            logger.info(f"After category filter: {len(filtered_offers)}")  # <-- ДОБАВИТЬ
+
         if q:
             q_lower = q.lower()
             filtered_offers = [
-                o for o in filtered_offers 
+                o for o in filtered_offers
                 if q_lower in str(o.get("title", "")).lower()
             ]
+            logger.info(f"After q filter '{q}': {len(filtered_offers)}")
         
         # Применяем пагинацию
         total = len(filtered_offers)
@@ -438,3 +440,33 @@ async def refresh_cache():
             status_code=500,
             detail="Internal server error"
         )
+
+
+@router.get("/debug/search-in-cache")
+async def debug_search_in_cache(q: str = Query(..., description="Что искать")):
+    """Поиск товара напрямую в кэше для отладки"""
+    try:
+        all_offers = cache_manager.get_all_offers()
+
+        q_lower = q.lower()
+        found = []
+
+        for offer in all_offers:
+            title = str(offer.get("title", "")).lower()
+            if q_lower in title:
+                found.append({
+                    "offer_id": offer.get("offer_id"),
+                    "title": offer.get("title"),
+                    "seller": offer.get("seller_name"),
+                    "price": offer.get("price")
+                })
+
+        return {
+            "query": q,
+            "total_in_cache": len(all_offers),
+            "found_count": len(found),
+            "results": found[:10]  # первые 10
+        }
+    except Exception as e:
+        logger.error(f"Debug search error: {e}", exc_info=True)
+        return {"error": str(e)}

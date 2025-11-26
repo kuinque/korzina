@@ -34,60 +34,81 @@ class CacheManager:
         self._is_loaded = False
         
         logger.info("CacheManager initialized")
-    
+
     def load_all_data(self) -> bool:
         """
         Загрузить все данные из БД в кэш
-        
+
         Returns:
             True если загрузка успешна, False в противном случае
         """
         try:
             logger.info("Loading all data into cache...")
-            
-            # Загружаем все офферы
-            result = self.db_client.table("offers").select("*").execute()
-            all_offers = result.data or []
-            
+
+            # Загружаем все офферы с пагинацией
+            # Supabase ограничивает до 1000 записей за запрос
+            all_offers = []
+            page_size = 1000
+            offset = 0
+
+            while True:
+                result = self.db_client.table("offers") \
+                    .select("*") \
+                    .range(offset, offset + page_size - 1) \
+                    .execute()
+
+                batch = result.data or []
+                if not batch:
+                    break
+
+                all_offers.extend(batch)
+                logger.info(f"Loaded {len(all_offers)} offers so far...")
+
+                # Если получили меньше page_size, значит это последняя страница
+                if len(batch) < page_size:
+                    break
+
+                offset += page_size
+
             with self._lock:
                 # Сохраняем все офферы
                 self._all_offers = all_offers
-                
+
                 # Группируем по продавцам
                 self._offers_by_seller = {}
                 self._seller_info = {}
                 sellers_set = set()
-                
+
                 for offer in all_offers:
                     seller_name = offer.get("seller_name")
                     if seller_name:
                         sellers_set.add(seller_name)
-                        
+
                         # Группируем офферы по продавцам
                         if seller_name not in self._offers_by_seller:
                             self._offers_by_seller[seller_name] = []
                         self._offers_by_seller[seller_name].append(offer)
-                        
+
                         # Сохраняем информацию о продавце (первый оффер)
                         if seller_name not in self._seller_info:
                             self._seller_info[seller_name] = {
                                 "name": seller_name,
                                 "id": seller_name
                             }
-                
+
                 # Сохраняем уникальных продавцов
                 self._unique_sellers = sorted(list(sellers_set))
-                
+
                 # Обновляем метаданные
                 self._last_update = datetime.now()
                 self._is_loaded = True
-            
+
             logger.info(
                 f"Cache loaded successfully: {len(all_offers)} offers, "
                 f"{len(self._unique_sellers)} sellers"
             )
             return True
-            
+
         except Exception as e:
             logger.error(f"Error loading data into cache: {e}")
             return False
