@@ -11,8 +11,9 @@ from app.models import (
     StatsResponse,
     ErrorResponse,
     ProductMatch,
+    AlternativesResponse,
     AlternativesRequest,
-    AlternativesResponse
+    AlternativeMatch
 )
 from app.services.shop_search_service import ShopSearchService
 from app.database.client import cache_manager
@@ -103,27 +104,30 @@ async def get_offers(
 ):
     """Получить список офферов с пагинацией"""
     try:
+        # Получаем все офферы
         all_offers = cache_manager.get_all_offers()
         logger.info(f"Total offers: {len(all_offers)}")  # <-- ДОБАВИТЬ
 
-        filtered_offers = all_offers
 
+        # Применяем фильтры
+        filtered_offers = all_offers
+        
         if seller:
             filtered_offers = [o for o in filtered_offers if o.get("seller_name") == seller]
-            logger.info(f"After seller filter: {len(filtered_offers)}")  # <-- ДОБАВИТЬ
+        logger.info(f"After seller filter: {len(filtered_offers)}")  # <-- ДОБАВИТЬ
 
         if category:
             filtered_offers = [o for o in filtered_offers if o.get("category_name") == category]
-            logger.info(f"After category filter: {len(filtered_offers)}")  # <-- ДОБАВИТЬ
+        logger.info(f"After category filter: {len(filtered_offers)}")  # <-- ДОБАВИТЬ
 
         if q:
             q_lower = q.lower()
             filtered_offers = [
-                o for o in filtered_offers
+                o for o in filtered_offers 
                 if q_lower in str(o.get("title", "")).lower()
             ]
-            logger.info(f"After q filter '{q}': {len(filtered_offers)}")
-        
+        logger.info(f"After q filter '{q}': {len(filtered_offers)}")
+
         # Применяем пагинацию
         total = len(filtered_offers)
         paginated_offers = filtered_offers[offset:offset + limit]
@@ -399,14 +403,34 @@ async def compare_prices(
 async def get_all_alternatives(request: AlternativesRequest) -> AlternativesResponse:
     """Получить альтернативы для набора офферов по всем магазинам"""
     try:
+        logger.info(f"Received alternatives request for {len(request.offer_ids)} offers")
+
         alternatives = shop_search_service.find_alternatives_for_offers(request.offer_ids)
+
+        # Преобразуем в нужный формат
+        shops_formatted = {}
+        for shop_name, matches in alternatives.items():
+            shops_formatted[shop_name] = [
+                AlternativeMatch(
+                    target_offer_id=match["target_offer_id"],
+                    target_title=match.get("target_title"),
+                    match_type=match["match_type"],
+                    similarity=match["similarity"],
+                    matched_offer=match.get("matched_offer")
+                )
+                for match in matches
+            ]
+
+        logger.info(f"Successfully found alternatives in {len(shops_formatted)} shops")
+
         return AlternativesResponse(
             status="success",
             request_count=len(request.offer_ids),
-            total_shops=len(alternatives),
-            shops=alternatives
+            total_shops=len(shops_formatted),
+            shops=shops_formatted
         )
     except ValueError as exc:
+        logger.warning(f"Validation error in alternatives: {exc}")
         raise HTTPException(
             status_code=404,
             detail=str(exc)
@@ -417,7 +441,6 @@ async def get_all_alternatives(request: AlternativesRequest) -> AlternativesResp
             status_code=500,
             detail="Internal server error"
         ) from exc
-
 
 @router.get(
     "/cache/info",
@@ -471,8 +494,6 @@ async def refresh_cache():
             status_code=500,
             detail="Internal server error"
         )
-
-
 @router.get("/debug/search-in-cache")
 async def debug_search_in_cache(q: str = Query(..., description="Что искать")):
     """Поиск товара напрямую в кэше для отладки"""
@@ -501,3 +522,29 @@ async def debug_search_in_cache(q: str = Query(..., description="Что иска
     except Exception as e:
         logger.error(f"Debug search error: {e}", exc_info=True)
         return {"error": str(e)}
+
+
+@router.get("/debug/sample-offer-ids")
+async def get_sample_offer_ids():
+    """Получить примеры реальных ID офферов из кэша"""
+    try:
+        all_offers = cache_manager.get_all_offers()
+
+        # Берем первые 20 офферов
+        sample_offers = []
+        for offer in all_offers[200:2400:15]:
+            sample_offers.append({
+                "offer_id": offer.get("offer_id"),
+                "title": offer.get("title"),
+                "seller": offer.get("seller_name"),
+                "price": offer.get("price")
+            })
+
+        return {
+            "total_in_cache": len(all_offers),
+            "sample_offers": sample_offers
+        }
+    except Exception as e:
+        logger.error(f"Error getting sample IDs: {e}", exc_info=True)
+        return {"error": str(e)}
+
