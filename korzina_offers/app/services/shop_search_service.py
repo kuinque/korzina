@@ -398,6 +398,93 @@ class ShopSearchService:
 
         return top_matches
 
+    def find_similar_offers_in_same_shop(self, offer_id: int, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Найти похожие офферы в том же магазине
+        
+        Использует ту же логику, что и find_alternatives_for_offers:
+        - Извлечение ключевых слов через _extract_key_words
+        - Поиск совпадений через _find_top_matches
+        - Группировка офферов через _group_offers_by_sellers
+        
+        Args:
+            offer_id: ID исходного оффера
+            limit: Максимальное количество похожих офферов
+            
+        Returns:
+            Список похожих офферов с информацией о similarity и match_type
+        """
+        logger.info(f"Searching similar offers for offer_id: {offer_id}")
+        
+        # Получаем все офферы из кэша
+        all_offers = cache_manager.get_all_offers()
+        
+        # Находим исходный оффер
+        source_offer = None
+        for offer in all_offers:
+            if offer.get("offer_id") == offer_id:
+                source_offer = offer
+                break
+        
+        if not source_offer:
+            logger.warning(f"Offer {offer_id} not found")
+            return []
+        
+        source_title = source_offer.get("title", "")
+        source_category = source_offer.get("category_name")
+        source_price = self._normalize_price(source_offer.get("price"))
+        source_seller = source_offer.get("seller_name")
+        
+        if not source_seller:
+            logger.warning(f"Offer {offer_id} has no seller_name")
+            return []
+        
+        logger.info(f"Source offer: '{source_title[:60]}...' from shop: {source_seller}")
+        
+        # Используем ту же логику группировки, что и в find_alternatives_for_offers
+        sellers_data = self._group_offers_by_sellers(all_offers)
+        
+        if source_seller not in sellers_data:
+            logger.warning(f"Shop {source_seller} not found in sellers data")
+            return []
+        
+        seller_data = sellers_data[source_seller]
+        
+        # Исключаем исходный оффер из поиска
+        shop_products: Dict[int, Dict[str, Any]] = {
+            offer_id_item: product_data
+            for offer_id_item, product_data in seller_data["offers"].items()
+            if offer_id_item != offer_id
+        }
+        
+        logger.info(f"Found {len(shop_products)} offers in shop {source_seller} (excluding source)")
+        
+        # Извлекаем ключевые слова из исходного оффера (та же логика)
+        search_query = self._extract_key_words(source_title)
+        logger.info(f"Extracted keywords: '{search_query}'")
+        
+        # Ищем похожие офферы (та же логика поиска)
+        similar_offers = self._find_top_matches(
+            search_query=search_query,
+            shop_products=shop_products,
+            target_category=source_category,
+            target_price=source_price,
+            limit=limit
+        )
+        
+        # Формируем результат
+        result = []
+        for match in similar_offers:
+            result.append({
+                "offer_id": match["offer_id"],
+                "similarity": match["similarity"],
+                "match_type": match["match_type"],
+                "offer": match["offer"]
+            })
+        
+        logger.info(f"Found {len(result)} similar offers for offer_id: {offer_id}")
+        return result
+
     @staticmethod
     def _normalize_price(price: Any) -> Optional[float]:
         """Преобразовать цену к float при необходимости"""
