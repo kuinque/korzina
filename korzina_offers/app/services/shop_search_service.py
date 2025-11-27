@@ -63,8 +63,7 @@ class ShopSearchService:
             logger.error(f"Error in seller search: {e}")
             raise
 
-    #TODO: Разобраться в чем проблема
-    def find_alternatives_for_offers(self, offer_ids: List[int]) -> List[Dict[str, Any]]:
+    def find_alternatives_for_offers(self, offer_ids: List[int]) -> Dict[str, List[Dict[str, Any]]]:
         """
         Найти альтернативные предложения для списка офферов по всем магазинам
 
@@ -72,8 +71,9 @@ class ShopSearchService:
             offer_ids: Список ID исходных офферов
 
         Returns:
-            Список с альтернативами по магазинам
+            Словарь с альтернативами по магазинам
         """
+        logger.info(f"=== ALTERNATIVES SEARCH START ===")
         logger.info(f"Searching alternatives for offers: {offer_ids}")
 
         all_offers = cache_manager.get_all_offers()
@@ -92,65 +92,78 @@ class ShopSearchService:
             for offer_id in offer_ids
             if offer_id in selected_offers_map
         ]
+        logger.info(f"Target offers loaded: {len(target_offers)}")
+
         sellers_data = self._group_offers_by_sellers(all_offers)
+        logger.info(f"Grouped into {len(sellers_data)} sellers")
 
-        # Подготовим структуры для накопления результатов в порядке магазинов
-        shop_results: Dict[str, Dict[str, Any]] = {
-            seller_name: {
-                "shop_name": seller_data["name"],
-                "matches": []
-            }
-            for seller_name, seller_data in sellers_data.items()
-        }
-
+        alternatives: Dict[str, List[Dict[str, Any]]] = {}
         ordered_sellers = sorted(sellers_data.keys())
 
-        # Идём по списку искомых офферов и находим альтернативы в каждом магазине
-        for target in target_offers:
-            target_title = target.get("title", "")
-            target_category = target.get("category_name")
-            target_price = self._normalize_price(target.get("price"))
-            target_id = target.get("offer_id")
+        logger.debug(f"Processing {len(ordered_sellers)} sellers")
 
-            for seller_name in ordered_sellers:
-                seller_data = sellers_data[seller_name]
-                offer_id, offer_data, similarity, match_type = self.product_service.find_best_product_match(
-                    target_product=target_title,
+        # Для каждого магазина
+        for seller_name in ordered_sellers:
+            seller_data = sellers_data[seller_name]
+            shop_name = seller_data["name"]
+            shop_matches = []
+
+            logger.debug(f"Processing shop: {shop_name} ({len(seller_data['offers'])} offers)")
+
+            # Для каждого целевого товара
+            for idx, target in enumerate(target_offers, 1):
+                target_title = target.get("title", "")
+                target_category = target.get("category_name")
+                target_price = self._normalize_price(target.get("price"))
+                target_id = target.get("offer_id")
+
+                # НОВОЕ: Извлекаем ключевые слова из названия
+                search_query = self._extract_key_words(target_title)
+
+                logger.info(
+                    f"  [{idx}/{len(target_offers)}] Target: '{target_title[:60]}...'"
+                )
+                logger.info(f"    Extracted keywords: '{search_query}'")
+
+                # Ищем только один лучший вариант
+                top_matches = self._find_top_matches(
+                    search_query=search_query,
                     shop_products=seller_data["offers"],
-                    used_products=set(),  # Каждый оффер рассматривается независимо
                     target_category=target_category,
-                    target_price=target_price
+                    target_price=target_price,
+                    limit=1
                 )
 
-                if offer_id and offer_data:
-                    matched_offer = offer_data.get("offer_data") or {
-                        "offer_id": offer_id,
-                        "title": offer_data.get("name"),
-                        "description": None,
-                        "price": offer_data.get("price"),
-                        "currency": None,
-                        "category_name": offer_data.get("category"),
-                        "seller_name": seller_data["name"],
-                        "images": []
-                    }
+                logger.info(f"    Found {len(top_matches)} matches in {shop_name}")
+
+                # Добавляем лучший вариант с offer_number: 1
+                if top_matches:
+                    match = top_matches[0]
+                    shop_matches.append({
+                        "offer_number": 1,
+                        "target_offer_id": target_id,
+                        "target_title": target_title,
+                        "similarity": match["similarity"],
+                        "match_type": match["match_type"],
+                        "matched_offer": match["offer"]
+                    })
                 else:
-                    similarity = 0.0
-                    match_type = MatchType.NONE
-                    matched_offer = self._build_empty_offer(seller_data["name"])
+                    # Если ничего не найдено, добавляем пустую запись
+                    shop_matches.append({
+                        "offer_number": 1,
+                        "target_offer_id": target_id,
+                        "target_title": target_title,
+                        "similarity": 0.0,
+                        "match_type": MatchType.NONE,
+                        "matched_offer": self._build_empty_offer(shop_name)
+                    })
 
-                shop_results[seller_name]["matches"].append({
-                    "target_offer_id": target_id,
-                    "target_title": target_title,
-                    "similarity": similarity,
-                    "match_type": match_type,
-                    "matched_offer": matched_offer
-                })
+            alternatives[shop_name] = shop_matches
+            logger.info(f"  {shop_name}: {len(shop_matches)} alternatives found")
 
-        alternatives = {
-            shop_results[name]["shop_name"]: shop_results[name]["matches"]
-            for name in ordered_sellers
-        }
-        logger.info(f"Alternatives calculated for {len(alternatives)} shops")
+        logger.info(f"=== ALTERNATIVES SEARCH END ===")
+        logger.info(f"Total shops processed: {len(alternatives)}")
+
         return alternatives
 
     def _group_offers_by_sellers(self, all_offers: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -283,6 +296,107 @@ class ShopSearchService:
                 logger.warning(f"Product '{product_name}' not found in database")
 
         return products_info
+
+    def _extract_key_words(self, title: str) -> str:
+        """
+        Извлечь ключевые слова из названия товара
+        Args:
+            title: Полное название товара
+        Returns:
+            Ключевые слова для поиска
+        """
+        # Убираем стоп-слова и извлекаем главное
+        clean = self.product_service.remove_stop_words(title)
+
+        # Берем первые 2-3 значимых слова
+        words = clean.split()[:3]
+        result = " ".join(words)
+
+        logger.debug(f"Extracted key words from '{title}': '{result}'")
+        return result
+
+    def _find_top_matches(
+            self,
+            search_query: str,
+            shop_products: Dict[int, Dict[str, Any]],
+            target_category: Optional[str],
+            target_price: Optional[float],
+            limit: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        Найти топ-N лучших совпадений в магазине
+        Args:
+            search_query: Поисковый запрос (ключевые слова)
+            shop_products: Товары магазина
+            target_category: Категория товара
+            target_price: Цена товара
+            limit: Количество результатов
+        Returns:
+            Список лучших совпадений
+        """
+        matches = []
+        search_lower = search_query.lower()
+
+        logger.debug(f"Searching for: '{search_query}', category: '{target_category}'")
+
+        for offer_id, product in shop_products.items():
+            product_name = product.get("name", "").lower()
+            product_clean = product.get("clean_name", "").lower()
+            product_category = product.get("category")
+
+            # СТРОГАЯ ПРОВЕРКА КАТЕГОРИИ - если категория задана, она должна совпадать
+            if target_category and product_category != target_category:
+                continue  # Пропускаем товары из других категорий
+
+            similarity = 0.0
+            match_type = MatchType.NONE
+
+            # Проверяем вхождение в полное название
+            if search_lower in product_name:
+                similarity = 0.8
+                match_type = MatchType.PARTIAL_FULL
+            # Проверяем вхождение в очищенное название
+            elif search_lower in product_clean:
+                similarity = 0.6
+                match_type = MatchType.PARTIAL_CLEAN
+            # Проверяем отдельные слова
+            else:
+                search_words = set(search_lower.split())
+                product_words = set(product_clean.split())
+                common_words = search_words & product_words
+
+                if common_words:
+                    similarity = len(common_words) / len(search_words)
+                    match_type = MatchType.PARTIAL_CLEAN
+
+            # Порог similarity > 0.5
+            if similarity > 0.5:
+                matches.append({
+                    "offer_id": offer_id,
+                    "similarity": similarity,
+                    "match_type": match_type,
+                    "offer": product.get("offer_data") or {
+                        "offer_id": offer_id,
+                        "title": product.get("name"),
+                        "price": product.get("price"),
+                        "category_name": product.get("category"),
+                    }
+                })
+
+        # Сортируем по similarity и берем топ-N
+        matches.sort(key=lambda x: x["similarity"], reverse=True)
+        top_matches = matches[:limit]
+
+        logger.info(
+            f"Found {len(matches)} matches in category '{target_category}', "
+            f"returning top {len(top_matches)}"
+        )
+        for i, match in enumerate(top_matches, 1):
+            logger.info(
+                f"  {i}. [{match['similarity']:.2f}] {match['offer']['title'][:60]}..."
+            )
+
+        return top_matches
 
     @staticmethod
     def _normalize_price(price: Any) -> Optional[float]:
