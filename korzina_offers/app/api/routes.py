@@ -5,14 +5,15 @@ from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 
 from app.models import (
-    SearchRequest,
+SearchRequest,
     SearchResponse,
     HealthResponse,
     StatsResponse,
     ErrorResponse,
     ProductMatch,
+    AlternativesResponse,
     AlternativesRequest,
-    AlternativesResponse
+    AlternativeMatch
 )
 from app.services.shop_search_service import ShopSearchService
 from app.database.client import cache_manager
@@ -388,35 +389,6 @@ async def compare_prices(
             status_code=500,
             detail="Internal server error"
         )
-
-
-@router.post(
-    "/all_alternatives",
-    response_model=AlternativesResponse,
-    summary="Альтернативы по всем магазинам",
-    description="Для списка офферов возвращает похожие предложения для каждого магазина"
-)
-async def get_all_alternatives(request: AlternativesRequest) -> AlternativesResponse:
-    """Получить альтернативы для набора офферов по всем магазинам"""
-    try:
-        alternatives = shop_search_service.find_alternatives_for_offers(request.offer_ids)
-        return AlternativesResponse(
-            status="success",
-            request_count=len(request.offer_ids),
-            total_shops=len(alternatives),
-            shops=alternatives
-        )
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail=str(exc)
-        ) from exc
-    except Exception as exc:
-        logger.error(f"All alternatives error: {exc}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error"
-        ) from exc
 
 
 @router.get(
