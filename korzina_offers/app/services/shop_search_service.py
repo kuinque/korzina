@@ -125,25 +125,37 @@ class ShopSearchService:
                 )
                 logger.info(f"    Extracted keywords: '{search_query}'")
 
-                # Ищем топ-5 лучших совпадений вместо одного
+                # Ищем только один лучший вариант
                 top_matches = self._find_top_matches(
                     search_query=search_query,
                     shop_products=seller_data["offers"],
                     target_category=target_category,
                     target_price=target_price,
-                    limit=5
+                    limit=1
                 )
 
                 logger.info(f"    Found {len(top_matches)} matches in {shop_name}")
 
-                # Добавляем все найденные совпадения
-                for match in top_matches:
+                # Добавляем лучший вариант с offer_number: 1
+                if top_matches:
+                    match = top_matches[0]
                     shop_matches.append({
+                        "offer_number": 1,
                         "target_offer_id": target_id,
                         "target_title": target_title,
                         "similarity": match["similarity"],
                         "match_type": match["match_type"],
                         "matched_offer": match["offer"]
+                    })
+                else:
+                    # Если ничего не найдено, добавляем пустую запись
+                    shop_matches.append({
+                        "offer_number": 1,
+                        "target_offer_id": target_id,
+                        "target_title": target_title,
+                        "similarity": 0.0,
+                        "match_type": MatchType.NONE,
+                        "matched_offer": self._build_empty_offer(shop_name)
                     })
 
             alternatives[shop_name] = shop_matches
