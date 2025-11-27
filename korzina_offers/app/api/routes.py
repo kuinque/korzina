@@ -473,6 +473,36 @@ async def refresh_cache():
         )
 
 
+@router.get(
+    "/offers/similar",
+    summary="Похожие офферы в том же магазине",
+    description="Найти все похожие офферы для указанного оффера в том же магазине"
+)
+async def get_offer_similar(
+    offer_id: int = Query(..., description="ID исходного оффера"),
+    limit: int = Query(10, description="Максимальное количество похожих офферов", ge=1, le=50)
+):
+    """Получить похожие офферы в том же магазине"""
+    try:
+        similar_offers = shop_search_service.find_similar_offers_in_same_shop(
+            offer_id=offer_id,
+            limit=limit
+        )
+        
+        return {
+            "status": "success",
+            "source_offer_id": offer_id,
+            "count": len(similar_offers),
+            "similar_offers": similar_offers
+        }
+    except Exception as e:
+        logger.error(f"Error finding similar offers: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error"
+        )
+
+
 @router.get("/debug/search-in-cache")
 async def debug_search_in_cache(q: str = Query(..., description="Что искать")):
     """Поиск товара напрямую в кэше для отладки"""
