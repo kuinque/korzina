@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Приложению нужен доступ к вашему местоположению для определения адреса доставки</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -24,6 +26,8 @@
         <string>Montserrat-Regular.ttf</string>
         <string>Inter-Regular.otf</string>
     </array>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Нужен доступ к медиатеке, чтобы выбрать аватар.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

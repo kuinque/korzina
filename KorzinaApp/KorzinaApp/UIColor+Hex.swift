@@ -3,8 +3,8 @@ import UIKit
 extension UIColor {
     
     
-    static let firstMC = UIColor(hex: "#FFC6DA")
-    static let secondMC = UIColor(hex: "#D1E760")
+    static let firstMC = UIColor(hex: "#FFE4EC")
+    static let secondMC = UIColor(hex: "#E5F3A5")
     static let primaryColor = UIColor(hex: "#3B9255")
     static let barColor = UIColor(hex: "#FFFCF2")
     

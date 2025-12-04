@@ -18,6 +18,7 @@ class MainView: UIViewController {
     var logo = UIImageView()
     var logoName = UIImageView()
     private let headerView = UIView()
+    private let locationButton = UIButton(type: .system)
     private let scrollView = UIScrollView()
     private let contentView = UIView()
 
@@ -25,7 +26,14 @@ class MainView: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .white
         setUpView()
+        loadSavedAddress()
         presenter?.viewDidLoad()
+    }
+    
+    private func loadSavedAddress() {
+        if let savedAddress = UserDefaults.standard.string(forKey: "savedAddress"), !savedAddress.isEmpty {
+            locationButton.setTitle(" \(savedAddress) >", for: .normal)
+        }
     }
     
     private func setUpView() {
@@ -72,13 +80,13 @@ class MainView: UIViewController {
         headerView.pinLeft(to: view)
         headerView.pinRight(to: view)
         
-        let locationButton = UIButton(type: .system)
         var pinImage = Self.resizeImage(named: "location1", to: CGSize(width: 30, height: 45))
         locationButton.setImage(pinImage, for: .normal)
         locationButton.setTitle(" Укажите адрес >", for: .normal)
         locationButton.titleLabel?.font = .systemFont(ofSize: 18)
         locationButton.tintColor = .locColor
         locationButton.imageEdgeInsets = UIEdgeInsets(top: 0, left: -4, bottom: 0, right: 4)
+        locationButton.addTarget(self, action: #selector(locationButtonTapped), for: .touchUpInside)
         headerView.addSubview(locationButton)
         locationButton.translatesAutoresizingMaskIntoConstraints = false
         locationButton.pinTop(to: headerView, 8)
@@ -208,6 +216,18 @@ class MainView: UIViewController {
         if let view = sender.view, let storeName = view.accessibilityLabel {
             presenter?.storeSelected(storeName: storeName)
         }
+    }
+    
+    @objc private func locationButtonTapped() {
+        let addressPickerVC = AddressPickerViewController()
+        addressPickerVC.onAddressSelected = { [weak self] address in
+            // Сохраняем адрес
+            UserDefaults.standard.set(address, forKey: "savedAddress")
+            // Обновляем текст кнопки с выбранным адресом
+            self?.locationButton.setTitle(" \(address) >", for: .normal)
+        }
+        let navController = UINavigationController(rootViewController: addressPickerVC)
+        present(navController, animated: true)
     }
     
     private static func resizeImage(named: String, to size: CGSize) -> UIImage? {

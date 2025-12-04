@@ -2,6 +2,7 @@
 Сервис для поиска магазинов
 """
 from typing import List, Dict, Any, Optional
+from collections import Counter
 from app.database.client import cache_manager
 from app.services.product_service import ProductService
 from app.models import ShopSolution, ProductMatch, SearchRequest, MatchType
@@ -63,7 +64,45 @@ class ShopSearchService:
             logger.error(f"Error in seller search: {e}")
             raise
 
-    #TODO: Разобраться в чем проблема
+    def find_products_in_shop(self, search_request: SearchRequest, shop_name: str) -> Optional[ShopSolution]:
+        """
+        Найти товары в конкретном магазине
+        
+        Args:
+            search_request: Запрос с списком товаров
+            shop_name: Название магазина
+            
+        Returns:
+            ShopSolution или None если магазин не найден
+        """
+        logger.info(f"Searching products in shop: {shop_name}")
+        
+        try:
+            # Получаем предложения конкретного магазина
+            shop_offers = cache_manager.get_offers_by_seller(shop_name)
+            
+            if not shop_offers:
+                logger.warning(f"No offers found for shop: {shop_name}")
+                return None
+            
+            # Группируем предложения по продавцам (только для этого магазина)
+            sellers_data = self._group_offers_by_sellers(shop_offers)
+            
+            if shop_name not in sellers_data:
+                logger.warning(f"Shop {shop_name} not found in grouped data")
+                return None
+            
+            # Оцениваем продавца для сравнения цен (разрешаем дубликаты)
+            solution = self._evaluate_seller_for_comparison(search_request.products, shop_name, sellers_data[shop_name])
+            
+            logger.info(f"Shop {shop_name}: found {solution.products_found_count} products, total price: {solution.total_price}")
+            
+            return solution
+            
+        except Exception as e:
+            logger.error(f"Error searching products in shop {shop_name}: {e}")
+            return None
+
     def find_alternatives_for_offers(self, offer_ids: List[int]) -> List[Dict[str, Any]]:
         """
         Найти альтернативные предложения для списка офферов по всем магазинам
@@ -166,7 +205,7 @@ class ShopSearchService:
             title = offer.get("title", "")
             price_raw = offer.get("price", 0)
 
-            # ИСПРАВЛЕНИЕ: Преобразуем цену в число
+            # Преобразуем цену в число
             try:
                 price = float(price_raw) if price_raw else 0
             except (ValueError, TypeError):
@@ -250,6 +289,67 @@ class ShopSearchService:
             products_found_count=products_found_count
         )
 
+    def _evaluate_seller_for_comparison(self, target_products: List[str], seller_name: str, seller_data: Dict[str, Any]) -> ShopSolution:
+        """Оценить продавца для сравнения цен (разрешает дубликаты товаров)"""
+        total_price = 0
+        found_products = []
+        
+        logger.debug(f"Evaluating seller for comparison: {seller_data['name']}")
+        
+        # Группируем товары по названию для подсчета количества
+        product_counts = Counter(target_products)
+        
+        for product_name, count in product_counts.items():
+            # Ищем товар в магазине
+            offer_id, offer_data, similarity, match_type = self.product_service.find_best_product_match(
+                product_name, seller_data["offers"], set()  # Не используем used_offer_ids
+            )
+            
+            if offer_id:
+                # Умножаем цену на количество
+                product_total_price = offer_data["price"] * count
+                total_price += product_total_price
+                
+                # Добавляем запись для каждого экземпляра товара
+                for i in range(count):
+                    found_products.append(ProductMatch(
+                        target=product_name,
+                        found=offer_data["name"],
+                        price=offer_data["price"],
+                        similarity=similarity,
+                        match_type=match_type,
+                        product_id=str(offer_id),
+                        offer_data=offer_data.get("offer_data")
+                    ))
+                logger.debug(f"Found: '{offer_data['name']}' for '{product_name}' (count: {count}, total: {product_total_price})")
+            else:
+                # Штраф за ненайденный товар (умножаем на количество)
+                penalty_total = config.PENALTY_PRICE * count
+                total_price += penalty_total
+                
+                # Добавляем запись для каждого экземпляра товара
+                for i in range(count):
+                    found_products.append(ProductMatch(
+                        target=product_name,
+                        found="НЕ НАЙДЕН",
+                        price=config.PENALTY_PRICE,
+                        similarity=0,
+                        match_type=MatchType.NONE
+                    ))
+                logger.debug(f"Not found: '{product_name}' (count: {count}, penalty: {penalty_total})")
+        
+        products_found_count = len([p for p in found_products if p.found != "НЕ НАЙДЕН"])
+        match_percentage = products_found_count / len(target_products)
+        
+        return ShopSolution(
+            shop_id=seller_name,
+            shop_name=seller_data["name"],
+            total_price=total_price,
+            found_products=found_products,
+            match_percentage=match_percentage,
+            products_found_count=products_found_count
+        )
+
     def _get_target_products_info(self, product_names: List[str], all_offers: List[Dict[str, Any]]) -> Dict[
         str, Dict[str, Any]]:
         """Получить информацию об искомых товарах из БД"""
@@ -258,10 +358,10 @@ class ShopSearchService:
         for product_name in product_names:
             product_name_lower = product_name.lower()
 
-            # ИСПРАВЛЕНИЕ: Ищем по вхождению подстроки, а не точному совпадению
+            # Ищем по вхождению подстроки, а не точному совпадению
             for offer in all_offers:
                 title = offer.get("title", "").lower()
-                if product_name_lower in title:  # <-- ЗДЕСЬ ИЗМЕНЕНИЕ
+                if product_name_lower in title:
                     price_raw = offer.get("price")
                     try:
                         price = float(price_raw) if price_raw else None

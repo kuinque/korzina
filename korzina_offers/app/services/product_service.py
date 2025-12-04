@@ -150,13 +150,30 @@ class ProductService:
                 # Если target полностью содержится в product - это хорошее совпадение
                 contains_threshold = SIMILARITY_THRESHOLDS['partial_clean']
                 if target_clean.lower() in product_clean.lower():
-                    contains_threshold = 0.4  # Более мягкий порог при вхождении
+                    contains_threshold = 0.2  # Еще более мягкий порог при вхождении
                 
                 logger.debug(f"Partial clean check: similarity={similarity:.2f}, threshold={contains_threshold}")
                 if similarity >= contains_threshold and match_priority < MATCH_PRIORITIES['partial_clean']:
                     match_priority = MATCH_PRIORITIES['partial_clean']
                     similarity_score = similarity
                     logger.debug(f"Partial clean match: '{product_name}' (similarity: {similarity:.2f})")
+            
+            # 5. ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА ДЛЯ ПОХОЖИХ ТОВАРОВ
+            if match_priority == 0:
+                # Проверяем общие слова между товарами
+                target_words = set(target_clean.lower().split())
+                product_words = set(product_clean.lower().split())
+                common_words = target_words.intersection(product_words)
+                
+                if len(common_words) > 0:
+                    # Если есть общие слова, считаем это потенциальным совпадением
+                    word_similarity = len(common_words) / max(len(target_words), len(product_words))
+                    if word_similarity >= 0.3:  # Если 30% слов совпадают
+                        similarity = SequenceMatcher(None, target_clean.lower(), product_clean.lower()).ratio()
+                        if similarity >= 0.2:  # Очень мягкий порог для похожих товаров
+                            match_priority = MATCH_PRIORITIES['partial_clean']
+                            similarity_score = similarity
+                            logger.debug(f"Similar product match: '{product_name}' (word similarity: {word_similarity:.2f}, text similarity: {similarity:.2f})")
 
             # Если нашли совпадение, рассчитываем итоговую оценку
             if match_priority > 0:

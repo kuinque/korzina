@@ -6,6 +6,7 @@ from typing import Optional
 
 from app.models import (
     SearchRequest,
+    ComparePricesRequest,
     SearchResponse,
     HealthResponse,
     StatsResponse,
@@ -104,17 +105,17 @@ async def get_offers(
     """Получить список офферов с пагинацией"""
     try:
         all_offers = cache_manager.get_all_offers()
-        logger.info(f"Total offers: {len(all_offers)}")  # <-- ДОБАВИТЬ
+        logger.info(f"Total offers: {len(all_offers)}")
 
         filtered_offers = all_offers
 
         if seller:
             filtered_offers = [o for o in filtered_offers if o.get("seller_name") == seller]
-            logger.info(f"After seller filter: {len(filtered_offers)}")  # <-- ДОБАВИТЬ
+            logger.info(f"After seller filter: {len(filtered_offers)}")
 
         if category:
             filtered_offers = [o for o in filtered_offers if o.get("category_name") == category]
-            logger.info(f"After category filter: {len(filtered_offers)}")  # <-- ДОБАВИТЬ
+            logger.info(f"After category filter: {len(filtered_offers)}")
 
         if q:
             q_lower = q.lower()
@@ -151,7 +152,8 @@ async def get_offers(
 )
 async def get_products(
     shop: str = Query(..., description="Название продавца"),
-    q: Optional[str] = Query(None, description="Поисковый запрос")
+    q: Optional[str] = Query(None, description="Поисковый запрос"),
+    category: Optional[str] = Query(None, description="Фильтр по категории")
 ):
     """Получить предложения для конкретного продавца с опциональным поиском"""
     try:
@@ -173,18 +175,29 @@ async def get_products(
         # Формируем список предложений
         offers_list = []
         for offer in offers:
+            # Безопасное преобразование цены
+            price_raw = offer.get("price", 0)
+            try:
+                price = float(price_raw) if price_raw else 0.0
+            except (ValueError, TypeError):
+                price = 0.0
+            
             offers_list.append({
                 "id": offer["offer_id"],
                 "name": offer.get("title", ""),
-                "price": offer.get("price", 0),
+                "price": price,
                 "description": offer.get("description"),
                 "category": offer.get("category_name"),
                 "images": offer.get("images", [])
             })
 
+        # Применяем фильтры
         if q:
             qlower = q.lower()
             offers_list = [o for o in offers_list if qlower in str(o["name"]).lower()]
+        
+        if category:
+            offers_list = [o for o in offers_list if o.get("category") == category]
 
         return {
             "status": "success",
@@ -315,6 +328,64 @@ async def search_products_get(
 
 
 @router.post(
+    "/search-product-in-shop",
+    summary="Поиск одного товара в магазине",
+    description="Найти похожий товар в конкретном магазине (для инкрементального обновления корзины)"
+)
+async def search_product_in_shop(
+    product_name: str = Query(..., description="Название товара для поиска"),
+    shop_name: str = Query(..., description="Название магазина")
+):
+    """Найти похожий товар в конкретном магазине"""
+    try:
+        # Создаем простой запрос с одним товаром
+        request = SearchRequest(products=[product_name], shop=shop_name)
+        
+        # Ищем товар в магазине
+        result = shop_search_service.find_products_in_shop(request, shop_name)
+        
+        if result and result.products_found_count > 0:
+            # Возвращаем первый найденный товар
+            found_product = result.found_products[0]
+            
+            if found_product.found != "НЕ НАЙДЕН" and found_product.offer_data:
+                # Безопасное преобразование цены
+                price_raw = found_product.offer_data.get("price")
+                try:
+                    price = float(price_raw) if price_raw else 0.0
+                except (ValueError, TypeError):
+                    price = 0.0
+                
+                return {
+                    "status": "success",
+                    "found": True,
+                    "product": {
+                        "name": found_product.offer_data.get("title"),
+                        "price": price,
+                        "image": found_product.offer_data.get("images", [None])[0],
+                        "description": found_product.offer_data.get("description"),
+                        "category": found_product.offer_data.get("category_name"),
+                        "similarity": found_product.similarity
+                    }
+                }
+        
+        return {
+            "status": "success",
+            "found": False,
+            "product": None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Search product in shop error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error"
+        )
+
+
+@router.post(
     "/compare_prices",
     summary="Сравнение цен по магазинам",
     description="Находит магазин с самой дешевой корзиной и возвращает список товаров из этого магазина"
@@ -380,6 +451,100 @@ async def compare_prices(
             "products": shop_products[cheapest_shop_name]
         }
 
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Compare prices error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error"
+        )
+
+
+@router.post(
+    "/compare-prices",
+    summary="Сравнение цен",
+    description="Сравнить цены товаров из корзины во всех магазинах"
+)
+async def compare_prices_v2(request: ComparePricesRequest):
+    """Сравнить цены товаров во всех магазинах"""
+    try:
+        if not request.products:
+            # Возвращаем пустой результат для пустой корзины
+            return {
+                "status": "success",
+                "comparisons": []
+            }
+        
+        # Получаем все магазины
+        all_sellers = cache_manager.get_unique_sellers()
+        comparison_results = []
+        
+        for seller in all_sellers:
+            try:
+                # Ищем товары в конкретном магазине
+                result = shop_search_service.find_products_in_shop(request, seller)
+                
+                if result and result.products_found_count > 0:
+                    # Формируем полную информацию о товарах
+                    products_list = []
+                    for p in result.found_products:
+                        if p.found != "НЕ НАЙДЕН" and p.offer_data:
+                            # Безопасное преобразование цены
+                            price_raw = p.offer_data.get("price")
+                            try:
+                                price = float(price_raw) if price_raw else 0.0
+                            except (ValueError, TypeError):
+                                price = 0.0
+                            
+                            products_list.append({
+                                "target": p.target,
+                                "found": p.found,
+                                "price": price,
+                                "similarity": p.similarity,
+                                "match_type": p.match_type if isinstance(p.match_type, str) else p.match_type.value,
+                                "name": p.offer_data.get("title"),
+                                "image": p.offer_data.get("images", [None])[0],
+                                "description": p.offer_data.get("description"),
+                                "category": p.offer_data.get("category_name")
+                            })
+                    
+                    comparison_results.append({
+                        "shop_name": seller,
+                        "total_price": result.total_price,
+                        "products_found": result.products_found_count,
+                        "products_total": len(request.products),
+                        "match_percentage": result.match_percentage,
+                        "products": products_list
+                    })
+                else:
+                    # Если товары не найдены в этом магазине
+                    comparison_results.append({
+                        "shop_name": seller,
+                        "total_price": None,
+                        "products_found": 0,
+                        "products_total": len(request.products),
+                        "match_percentage": 0.0,
+                        "products": []
+                    })
+            except Exception as e:
+                logger.error(f"Error comparing prices for {seller}: {e}")
+                comparison_results.append({
+                    "shop_name": seller,
+                    "total_price": None,
+                    "products_found": 0,
+                    "products_total": len(request.products),
+                    "match_percentage": 0.0,
+                    "products": []
+                })
+        
+        # Сортируем по цене (сначала магазины с найденными товарами)
+        comparison_results.sort(key=lambda x: (x["total_price"] is None, x["total_price"] or float('inf')))
+        
+        return {
+            "status": "success",
+            "comparisons": comparison_results
+        }
     except HTTPException:
         raise
     except Exception as e:
