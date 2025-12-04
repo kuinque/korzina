@@ -6,6 +6,9 @@ python-dotenv==1.0.0
 pydantic>=2.9.0
 pydantic-settings>=2.0.0
 
+# Fuzzy matching для поиска похожих товаров
+rapidfuzz>=3.6.0
+
 # Разработка и тестирование
 pytest==8.0.0
 pytest-cov==4.1.0
