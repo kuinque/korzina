@@ -2,11 +2,13 @@
 Сервис для поиска магазинов
 """
 from typing import List, Dict, Any, Optional
+from rapidfuzz import fuzz
 from app.database.client import cache_manager
 from app.services.product_service import ProductService
 from app.models import ShopSolution, ProductMatch, SearchRequest, MatchType
 from app.config import config
 from app.core.logger import get_logger
+from app.core.constants import FUZZY_THRESHOLDS, FUZZY_WEIGHTS
 
 logger = get_logger(__name__)
 
@@ -297,23 +299,95 @@ class ShopSearchService:
 
         return products_info
 
-    def _extract_key_words(self, title: str) -> str:
+    def _extract_key_words(self, title: str, max_words: int = 6) -> str:
         """
-        Извлечь ключевые слова из названия товара
+        Извлечь ключевые слова из названия товара для fuzzy matching
+        
         Args:
             title: Полное название товара
+            max_words: Максимальное количество слов (по умолчанию 6 для лучшего fuzzy matching)
+            
         Returns:
             Ключевые слова для поиска
         """
         # Убираем стоп-слова и извлекаем главное
         clean = self.product_service.remove_stop_words(title)
 
-        # Берем первые 2-3 значимых слова
-        words = clean.split()[:3]
+        # Для fuzzy matching оставляем больше слов (до max_words)
+        # Это позволяет rapidfuzz лучше находить похожие товары
+        words = clean.split()[:max_words]
         result = " ".join(words)
 
         logger.debug(f"Extracted key words from '{title}': '{result}'")
         return result
+
+    def _calculate_fuzzy_score(self, query: str, target: str) -> float:
+        """
+        Рассчитать комбинированный fuzzy score используя rapidfuzz
+        
+        Комбинирует несколько метрик:
+        - token_set_ratio: устойчив к перестановкам слов и дубликатам
+        - token_sort_ratio: сортирует слова перед сравнением
+        - partial_ratio: находит лучшее частичное совпадение
+        
+        Args:
+            query: Поисковый запрос
+            target: Строка для сравнения
+            
+        Returns:
+            Нормализованный score от 0 до 1
+        """
+        # Получаем разные метрики (rapidfuzz возвращает 0-100)
+        token_set = fuzz.token_set_ratio(query, target)
+        token_sort = fuzz.token_sort_ratio(query, target)
+        partial = fuzz.partial_ratio(query, target)
+        
+        # Комбинируем с весами
+        combined = (
+            FUZZY_WEIGHTS['token_set'] * token_set +
+            FUZZY_WEIGHTS['token_sort'] * token_sort +
+            FUZZY_WEIGHTS['partial'] * partial
+        )
+        
+        # Нормализуем к 0-1
+        return combined / 100.0
+
+    def _determine_match_type(self, fuzzy_score: float, query: str, product_name: str, product_clean: str) -> MatchType:
+        """
+        Определить тип совпадения на основе fuzzy score и проверок
+        
+        Args:
+            fuzzy_score: Нормализованный fuzzy score (0-1)
+            query: Поисковый запрос
+            product_name: Полное название товара
+            product_clean: Очищенное название товара
+            
+        Returns:
+            MatchType
+        """
+        query_lower = query.lower()
+        name_lower = product_name.lower()
+        clean_lower = product_clean.lower()
+        
+        # Точное совпадение (очень высокий score + вхождение)
+        if fuzzy_score >= FUZZY_THRESHOLDS['high'] / 100.0:
+            if query_lower in name_lower or name_lower in query_lower:
+                return MatchType.PARTIAL_FULL
+            if query_lower in clean_lower or clean_lower in query_lower:
+                return MatchType.PARTIAL_CLEAN
+            return MatchType.PARTIAL_FULL
+        
+        # Среднее совпадение
+        if fuzzy_score >= FUZZY_THRESHOLDS['medium'] / 100.0:
+            if query_lower in name_lower:
+                return MatchType.PARTIAL_FULL
+            return MatchType.PARTIAL_CLEAN
+        
+        # Низкое совпадение
+        if fuzzy_score >= FUZZY_THRESHOLDS['low'] / 100.0:
+            return MatchType.PARTIAL_CLEAN
+        
+        return MatchType.NONE
 
     def _find_top_matches(
             self,
@@ -324,62 +398,66 @@ class ShopSearchService:
             limit: int = 5
     ) -> List[Dict[str, Any]]:
         """
-        Найти топ-N лучших совпадений в магазине
+        Найти топ-N лучших совпадений в магазине используя fuzzy matching
+        
         Args:
             search_query: Поисковый запрос (ключевые слова)
             shop_products: Товары магазина
             target_category: Категория товара
             target_price: Цена товара
             limit: Количество результатов
+            
         Returns:
             Список лучших совпадений
         """
         matches = []
         search_lower = search_query.lower()
+        min_threshold = FUZZY_THRESHOLDS['low'] / 100.0  # Минимальный порог для рассмотрения
 
-        logger.debug(f"Searching for: '{search_query}', category: '{target_category}'")
+        logger.debug(f"Fuzzy searching for: '{search_query}', category: '{target_category}'")
 
         for offer_id, product in shop_products.items():
-            product_name = product.get("name", "").lower()
-            product_clean = product.get("clean_name", "").lower()
+            product_name = product.get("name", "")
+            product_clean = product.get("clean_name", "")
             product_category = product.get("category")
 
             # СТРОГАЯ ПРОВЕРКА КАТЕГОРИИ - если категория задана, она должна совпадать
             if target_category and product_category != target_category:
                 continue  # Пропускаем товары из других категорий
 
-            similarity = 0.0
-            match_type = MatchType.NONE
-
-            # Проверяем вхождение в полное название
-            if search_lower in product_name:
-                similarity = 0.8
-                match_type = MatchType.PARTIAL_FULL
-            # Проверяем вхождение в очищенное название
-            elif search_lower in product_clean:
-                similarity = 0.6
-                match_type = MatchType.PARTIAL_CLEAN
-            # Проверяем отдельные слова
-            else:
-                search_words = set(search_lower.split())
-                product_words = set(product_clean.split())
-                common_words = search_words & product_words
-
-                if common_words:
-                    similarity = len(common_words) / len(search_words)
-                    match_type = MatchType.PARTIAL_CLEAN
-
-            # Порог similarity > 0.5
-            if similarity > 0.5:
+            # Рассчитываем fuzzy score для обоих вариантов названия
+            score_full = self._calculate_fuzzy_score(search_lower, product_name.lower())
+            score_clean = self._calculate_fuzzy_score(search_lower, product_clean.lower())
+            
+            # Берём лучший score
+            best_score = max(score_full, score_clean)
+            
+            # Бонус за совпадение цены (если задана)
+            price_bonus = 0.0
+            if target_price and target_price > 0:
+                product_price = product.get("price", 0)
+                if product_price > 0:
+                    price_diff = abs(target_price - product_price) / target_price
+                    if price_diff <= 0.3:  # В пределах 30%
+                        price_bonus = 0.05 * (1 - price_diff / 0.3)  # До +5% за близкую цену
+            
+            final_score = min(best_score + price_bonus, 1.0)
+            
+            # Проверяем минимальный порог
+            if final_score >= min_threshold:
+                match_type = self._determine_match_type(
+                    best_score, search_query, product_name, product_clean
+                )
+                
                 matches.append({
                     "offer_id": offer_id,
-                    "similarity": similarity,
+                    "similarity": final_score,
                     "match_type": match_type,
                     "offer": product.get("offer_data") or {
                         "offer_id": offer_id,
-                        "title": product.get("name"),
+                        "title": product_name,
                         "price": product.get("price"),
-                        "category_name": product.get("category"),
+                        "category_name": product_category,
                     }
                 })
 
@@ -388,12 +466,14 @@ class ShopSearchService:
         top_matches = matches[:limit]
 
         logger.info(
-            f"Found {len(matches)} matches in category '{target_category}', "
+            f"Fuzzy found {len(matches)} matches in category '{target_category}', "
             f"returning top {len(top_matches)}"
         )
         for i, match in enumerate(top_matches, 1):
+            title = match['offer'].get('title', 'N/A')
+            title_preview = title[:60] if title else 'N/A'
             logger.info(
-                f"  {i}. [{match['similarity']:.2f}] {match['offer']['title'][:60]}..."
+                f"  {i}. [{match['similarity']:.2f}] {title_preview}..."
             )
 
         return top_matches
