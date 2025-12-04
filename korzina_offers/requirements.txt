@@ -5,6 +5,7 @@ supabase>=2.20.0
 python-dotenv==1.0.0
 pydantic>=2.9.0
 pydantic-settings>=2.0.0
+rapidfuzz>=3.0.0
 
 # Разработка и тестирование
 pytest==8.0.0

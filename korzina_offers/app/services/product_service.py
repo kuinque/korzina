@@ -2,8 +2,11 @@
 Сервис для работы с товарами
 """
 from typing import List, Dict, Any, Optional, Tuple
-from difflib import SequenceMatcher
-from app.core.constants import STOP_WORDS, MATCH_PRIORITIES, SIMILARITY_THRESHOLDS, PRICE_TOLERANCE, SIMILARITY_WEIGHTS
+from rapidfuzz import fuzz
+from app.core.constants import (
+    STOP_WORDS, MATCH_PRIORITIES, SIMILARITY_THRESHOLDS, 
+    PRICE_TOLERANCE, SIMILARITY_WEIGHTS, FUZZY_THRESHOLDS, FUZZY_WEIGHTS
+)
 from app.models import ProductMatch, MatchType
 from app.core.logger import get_logger
 
@@ -19,6 +22,38 @@ class ProductService:
         words = text.lower().split()
         filtered_words = [word for word in words if word not in STOP_WORDS]
         return ' '.join(filtered_words)
+
+    @staticmethod
+    def calculate_fuzzy_similarity(query: str, target: str) -> float:
+        """
+        Рассчитать комбинированный fuzzy score используя rapidfuzz
+        
+        Комбинирует несколько метрик:
+        - token_set_ratio: устойчив к перестановкам слов и дубликатам
+        - token_sort_ratio: сортирует слова перед сравнением
+        - partial_ratio: находит лучшее частичное совпадение
+        
+        Args:
+            query: Поисковый запрос
+            target: Строка для сравнения
+            
+        Returns:
+            Нормализованный score от 0 до 1
+        """
+        # Получаем разные метрики (rapidfuzz возвращает 0-100)
+        token_set = fuzz.token_set_ratio(query, target)
+        token_sort = fuzz.token_sort_ratio(query, target)
+        partial = fuzz.partial_ratio(query, target)
+        
+        # Комбинируем с весами
+        combined = (
+            FUZZY_WEIGHTS['token_set'] * token_set +
+            FUZZY_WEIGHTS['token_sort'] * token_sort +
+            FUZZY_WEIGHTS['partial'] * partial
+        )
+        
+        # Нормализуем к 0-1
+        return combined / 100.0
 
     @staticmethod
     def calculate_category_similarity(target_category: Optional[str], product_category: str) -> float:
@@ -82,7 +117,7 @@ class ProductService:
             target_price: Optional[float] = None
     ) -> Tuple[Optional[str], Optional[Dict[str, Any]], float, MatchType]:
         """
-        Найти лучшее сопоставление товара в магазине
+        Найти лучшее сопоставление товара в магазине используя fuzzy matching (rapidfuzz)
 
         Args:
             target_product: Искомый товар
@@ -96,11 +131,17 @@ class ProductService:
         """
         best_match = None
         best_combined_score = 0
-        best_similarity = 0
-        best_priority = 0
-        target_clean = ProductService.remove_stop_words(target_product)
+        best_fuzzy_score = 0
+        best_match_type = MatchType.NONE
         
-        logger.debug(f"Searching for product: '{target_product}' (clean: '{target_clean}')")
+        target_lower = target_product.lower()
+        target_clean = ProductService.remove_stop_words(target_product)
+        target_clean_lower = target_clean.lower()
+        
+        # Минимальный порог для рассмотрения кандидата
+        min_threshold = FUZZY_THRESHOLDS['low'] / 100.0
+        
+        logger.debug(f"Fuzzy searching for product: '{target_product}' (clean: '{target_clean}')")
         logger.debug(f"Target category: {target_category}, Target price: {target_price}")
         logger.debug(f"Available products count: {len(shop_products)}")
         
@@ -109,77 +150,61 @@ class ProductService:
                 continue
             
             product_name = product_data["name"]
+            product_name_lower = product_name.lower()
             product_clean = product_data["clean_name"]
+            product_clean_lower = product_clean.lower()
             product_category = product_data.get("category", "")
             product_price = product_data["price"]
+
+            # Рассчитываем fuzzy similarity для обоих вариантов
+            fuzzy_full = ProductService.calculate_fuzzy_similarity(target_lower, product_name_lower)
+            fuzzy_clean = ProductService.calculate_fuzzy_similarity(target_clean_lower, product_clean_lower)
+            
+            # Берём лучший score
+            fuzzy_score = max(fuzzy_full, fuzzy_clean)
+            
+            # Пропускаем если ниже минимального порога
+            if fuzzy_score < min_threshold:
+                continue
+            
+            # Определяем match_type на основе fuzzy score
+            match_type = MatchType.NONE
             match_priority = 0
-            similarity_score = 0
-
-            logger.debug(
-                f"Checking product: id={product_id}, name='{product_name}', clean='{product_clean}', category='{product_category}', price={product_price}")
-
-            # 1. ТОЧНОЕ СОВПАДЕНИЕ (полное, с учетом стоп-слов)
-            if target_product.lower() == product_name.lower():
-                match_priority = MATCH_PRIORITIES['exact_full']
-                similarity_score = 1.0
-                logger.debug(f"Exact full match: '{product_name}'")
             
-            # 2. ЧАСТИЧНОЕ СОВПАДЕНИЕ (с учетом стоп-слов)
-            if (match_priority < MATCH_PRIORITIES['partial_full'] and
-                  (target_product.lower() in product_name.lower() or
-                   product_name.lower() in target_product.lower())):
-                similarity = SequenceMatcher(None, target_product.lower(), product_name.lower()).ratio()
-                logger.debug(f"Partial full check: similarity={similarity:.2f}, threshold={SIMILARITY_THRESHOLDS['partial_full']}")
-                if similarity >= SIMILARITY_THRESHOLDS['partial_full'] and match_priority < MATCH_PRIORITIES['partial_full']:
+            # 1. ТОЧНОЕ СОВПАДЕНИЕ (fuzzy score >= 95%)
+            if fuzzy_score >= 0.95:
+                if target_lower == product_name_lower:
+                    match_type = MatchType.EXACT_FULL
+                    match_priority = MATCH_PRIORITIES['exact_full']
+                elif target_clean_lower == product_clean_lower:
+                    match_type = MatchType.EXACT_CLEAN
+                    match_priority = MATCH_PRIORITIES['exact_clean']
+                else:
+                    match_type = MatchType.PARTIAL_FULL
                     match_priority = MATCH_PRIORITIES['partial_full']
-                    similarity_score = similarity
-                    logger.debug(f"Partial full match: '{product_name}' (similarity: {similarity:.2f})")
             
-            # 3. ТОЧНОЕ СОВПАДЕНИЕ БЕЗ СТОП-СЛОВ
-            if match_priority < MATCH_PRIORITIES['exact_clean'] and target_clean.lower() == product_clean.lower():
-                match_priority = MATCH_PRIORITIES['exact_clean']
-                similarity_score = 0.9
-                logger.debug(f"Exact clean match: '{product_name}'")
-            
-            # 4. ЧАСТИЧНОЕ СОВПАДЕНИЕ БЕЗ СТОП-СЛОВ
-            if (match_priority < MATCH_PRIORITIES['partial_clean'] and
-                  (target_clean.lower() in product_clean.lower() or
-                   product_clean.lower() in target_clean.lower())):
-                # Если одно слово содержится в другом, используем более мягкий порог
-                similarity = SequenceMatcher(None, target_clean.lower(), product_clean.lower()).ratio()
-                # Если target полностью содержится в product - это хорошее совпадение
-                contains_threshold = SIMILARITY_THRESHOLDS['partial_clean']
-                if target_clean.lower() in product_clean.lower():
-                    contains_threshold = 0.2  # Еще более мягкий порог при вхождении
-                
-                logger.debug(f"Partial clean check: similarity={similarity:.2f}, threshold={contains_threshold}")
-                if similarity >= contains_threshold and match_priority < MATCH_PRIORITIES['partial_clean']:
+            # 2. ВЫСОКОЕ СХОДСТВО (fuzzy score >= 80%)
+            elif fuzzy_score >= FUZZY_THRESHOLDS['high'] / 100.0:
+                if fuzzy_full >= fuzzy_clean:
+                    match_type = MatchType.PARTIAL_FULL
+                    match_priority = MATCH_PRIORITIES['partial_full']
+                else:
+                    match_type = MatchType.PARTIAL_CLEAN
                     match_priority = MATCH_PRIORITIES['partial_clean']
-                    similarity_score = similarity
-                    logger.debug(f"Partial clean match: '{product_name}' (similarity: {similarity:.2f})")
             
-            # 5. ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА ДЛЯ ПОХОЖИХ ТОВАРОВ
-            if match_priority == 0:
-                # Проверяем общие слова между товарами
-                target_words = set(target_clean.lower().split())
-                product_words = set(product_clean.lower().split())
-                common_words = target_words.intersection(product_words)
-                
-                if len(common_words) > 0:
-                    # Если есть общие слова, считаем это потенциальным совпадением
-                    word_similarity = len(common_words) / max(len(target_words), len(product_words))
-                    if word_similarity >= 0.3:  # Если 30% слов совпадают
-                        similarity = SequenceMatcher(None, target_clean.lower(), product_clean.lower()).ratio()
-                        if similarity >= 0.2:  # Очень мягкий порог для похожих товаров
-                            match_priority = MATCH_PRIORITIES['partial_clean']
-                            similarity_score = similarity
-                            logger.debug(f"Similar product match: '{product_name}' (word similarity: {word_similarity:.2f}, text similarity: {similarity:.2f})")
+            # 3. СРЕДНЕЕ СХОДСТВО (fuzzy score >= 60%)
+            elif fuzzy_score >= FUZZY_THRESHOLDS['medium'] / 100.0:
+                match_type = MatchType.PARTIAL_CLEAN
+                match_priority = MATCH_PRIORITIES['partial_clean']
+            
+            # 4. НИЗКОЕ СХОДСТВО (fuzzy score >= 45%)
+            elif fuzzy_score >= min_threshold:
+                match_type = MatchType.PARTIAL_CLEAN
+                match_priority = MATCH_PRIORITIES['partial_clean']
 
-            # Если нашли совпадение, рассчитываем итоговую оценку
             if match_priority > 0:
-                # Нормализуем текстовую схожесть от 0 до 1
-                # Приоритет делим на максимальный (4), умножаем на схожесть
-                text_similarity = (match_priority / MATCH_PRIORITIES['exact_full']) * similarity_score
+                # Нормализуем текстовую схожесть
+                text_similarity = (match_priority / MATCH_PRIORITIES['exact_full']) * fuzzy_score
 
                 # Рассчитываем схожесть по категории и цене
                 category_similarity = ProductService.calculate_category_similarity(
@@ -191,35 +216,28 @@ class ProductService:
 
                 # Итоговая оценка с учётом весов
                 combined_score = (
-                        SIMILARITY_WEIGHTS['text_match'] * text_similarity +
-                        SIMILARITY_WEIGHTS['category_match'] * category_similarity +
-                        SIMILARITY_WEIGHTS['price_proximity'] * price_similarity
+                    SIMILARITY_WEIGHTS['text_match'] * text_similarity +
+                    SIMILARITY_WEIGHTS['category_match'] * category_similarity +
+                    SIMILARITY_WEIGHTS['price_proximity'] * price_similarity
                 )
 
-                logger.debug(f"Scores for '{product_name}': text={text_similarity:.2f}, "
-                             f"category={category_similarity:.2f}, price={price_similarity:.2f}, "
-                             f"combined={combined_score:.2f}")
+                logger.debug(f"Fuzzy scores for '{product_name}': fuzzy={fuzzy_score:.2f}, "
+                             f"text={text_similarity:.2f}, category={category_similarity:.2f}, "
+                             f"price={price_similarity:.2f}, combined={combined_score:.2f}")
 
                 if best_match is None or combined_score > best_combined_score:
                     best_match = (product_id, product_data)
                     best_combined_score = combined_score
-                    best_text_similarity = similarity_score
-                    best_priority = match_priority
+                    best_fuzzy_score = fuzzy_score
+                    best_match_type = match_type
         
         if best_match:
             product_id, product_data = best_match
-            match_type = MatchType.NONE
-            
-            # Определяем тип сопоставления
-            for match_type_name, priority in MATCH_PRIORITIES.items():
-                if best_priority == priority:
-                    match_type = MatchType(match_type_name)
-                    break
 
-            logger.info(f"Best match found: '{product_data['name']}' "
-                        f"(type: {match_type.value}, text_score: {best_text_similarity:.2f}, "
+            logger.info(f"Fuzzy best match found: '{product_data['name']}' "
+                        f"(type: {best_match_type.value}, fuzzy_score: {best_fuzzy_score:.2f}, "
                         f"combined_score: {best_combined_score:.2f})")
-            return product_id, product_data, best_text_similarity, match_type
+            return product_id, product_data, best_fuzzy_score, best_match_type
         
-        logger.warning(f"No match found for product: '{target_product}'")
+        logger.warning(f"No fuzzy match found for product: '{target_product}'")
         return None, None, 0, MatchType.NONE
