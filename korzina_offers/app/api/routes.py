@@ -389,17 +389,18 @@ async def compare_prices(
             detail="Internal server error"
         )
 
-
 @router.post(
     "/all_alternatives",
     response_model=AlternativesResponse,
     summary="Альтернативы по всем магазинам",
-    description="Для списка офферов возвращает похожие предложения для каждого магазина"
+    description="Для списка офферов возвращает похожие предложения для каждого магазина. Опционально можно указать tag для фильтрации альтернатив."
 )
 async def get_all_alternatives(request: AlternativesRequest) -> AlternativesResponse:
     """Получить альтернативы для набора офферов по всем магазинам"""
     try:
-        alternatives = shop_search_service.find_alternatives_for_offers(request.offer_ids)
+        alternatives = shop_search_service.find_alternatives_for_offers(
+            request.offer_ids,
+        )
         return AlternativesResponse(
             status="success",
             request_count=len(request.offer_ids),
@@ -526,7 +527,7 @@ async def debug_search_in_cache(q: str = Query(..., description="Что иска
             "query": q,
             "total_in_cache": len(all_offers),
             "found_count": len(found),
-            "results": found[:10]  # первые 10
+            "results": found[:50]  # первые 10
         }
     except Exception as e:
         logger.error(f"Debug search error: {e}", exc_info=True)
