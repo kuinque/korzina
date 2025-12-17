@@ -141,14 +141,23 @@ class ShopSearchService:
                 # Добавляем лучший вариант с offer_number: 1
                 if top_matches:
                     match = top_matches[0]
+                    matched_offer = match["offer"]
+                    
+                    # Проверяем, идентичен ли найденный оффер исходному
+                    is_identical = self._is_identical_offer(target, matched_offer)
+                    
                     shop_matches.append({
                         "offer_number": 1,
                         "target_offer_id": target_id,
                         "target_title": target_title,
                         "similarity": match["similarity"],
                         "match_type": match["match_type"],
-                        "matched_offer": match["offer"]
+                        "is_identical": is_identical,
+                        "matched_offer": matched_offer
                     })
+                    
+                    if is_identical:
+                        logger.info(f"    ✓ Identical offer found in {shop_name}")
                 else:
                     # Если ничего не найдено, добавляем пустую запись
                     shop_matches.append({
@@ -157,6 +166,7 @@ class ShopSearchService:
                         "target_title": target_title,
                         "similarity": 0.0,
                         "match_type": MatchType.NONE,
+                        "is_identical": False,
                         "matched_offer": self._build_empty_offer(shop_name)
                     })
 
@@ -351,6 +361,72 @@ class ShopSearchService:
         
         # Нормализуем к 0-1
         return combined / 100.0
+
+    def _is_identical_offer(self, source_offer: Dict[str, Any], matched_offer: Dict[str, Any]) -> bool:
+        """
+        Проверить, идентичны ли два оффера (один и тот же товар в разных магазинах)
+        
+        Критерии идентичности:
+        - Очень высокая схожесть названий (fuzzy score >= 95%)
+        - Одинаковая категория
+        - Названия практически идентичны (token_sort_ratio >= 95)
+        
+        Args:
+            source_offer: Исходный оффер
+            matched_offer: Найденный оффер для сравнения
+            
+        Returns:
+            True если офферы идентичны, False иначе
+        """
+        source_title = source_offer.get("title", "").strip()
+        matched_title = matched_offer.get("title", "").strip()
+        
+        # Если названия пустые, не идентичны
+        if not source_title or not matched_title:
+            return False
+        
+        # Проверяем категорию
+        source_category = source_offer.get("category_name", "").strip()
+        matched_category = matched_offer.get("category_name", "").strip()
+        
+        if source_category and matched_category and source_category != matched_category:
+            return False
+        
+        # Проверяем схожесть названий через fuzzy matching
+        # Используем token_sort_ratio для проверки идентичности (сортирует слова перед сравнением)
+        token_sort_score = fuzz.token_sort_ratio(source_title.lower(), matched_title.lower())
+        
+        # Также проверяем полное совпадение после нормализации (убираем стоп-слова)
+        source_clean = self.product_service.remove_stop_words(source_title).lower()
+        matched_clean = self.product_service.remove_stop_words(matched_title).lower()
+        
+        # Если очищенные названия идентичны - точно один товар
+        if source_clean == matched_clean and source_clean:
+            return True
+        
+        # Если token_sort_ratio очень высокий (>= 95) - считаем идентичными
+        if token_sort_score >= 95:
+            return True
+        
+        # Дополнительная проверка: если оба названия содержат одинаковые ключевые слова
+        # и длина названий близка (разница не более 20%)
+        if source_clean and matched_clean:
+            source_words = set(source_clean.split())
+            matched_words = set(matched_clean.split())
+            
+            # Если все слова из одного названия есть в другом (или наоборот)
+            if source_words and matched_words:
+                if source_words == matched_words:
+                    return True
+                
+                # Если одно название полностью содержится в другом (с учетом порядка слов)
+                if len(source_words) == len(matched_words):
+                    # Проверяем через token_set_ratio для более точной оценки
+                    token_set_score = fuzz.token_set_ratio(source_title.lower(), matched_title.lower())
+                    if token_set_score >= 95:
+                        return True
+        
+        return False
 
     def _determine_match_type(self, fuzzy_score: float, query: str, product_name: str, product_clean: str) -> MatchType:
         """
