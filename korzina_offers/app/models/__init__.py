@@ -136,10 +136,12 @@ class AlternativesRequest(BaseModel):
 
 class AlternativeMatch(BaseModel):
     """Результат поиска альтернатив для товара"""
+    offer_number: int = 1
     target_offer_id: int
     target_title: Optional[str]
     match_type: MatchType = MatchType.NONE
     similarity: float = 0.0
+    is_identical: bool = False
     matched_offer: Optional[Dict[str, Any]] = None
 
 

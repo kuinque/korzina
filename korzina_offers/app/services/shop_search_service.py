@@ -362,14 +362,68 @@ class ShopSearchService:
         # Нормализуем к 0-1
         return combined / 100.0
 
+    def _normalize_title_for_identity(self, title: str) -> str:
+        """
+        Нормализовать название для определения идентичности
+        
+        Выполняет:
+        - Приведение к нижнему регистру
+        - Удаление предлогов и союзов (с, и, в, на)
+        - Нормализация запятых в числах (4,8% -> 4.8%)
+        - Удаление маркировок (без змж, мжд, бзмж)
+        - Нормализация пробелов (130 г -> 130г)
+        - Нормализация дефисов
+        - Удаление стоп-слов
+        
+        Args:
+            title: Исходное название
+            
+        Returns:
+            Нормализованное название
+        """
+        import re
+        
+        # Приводим к нижнему регистру
+        normalized = title.lower()
+        
+        # Нормализуем запятые в числах (4,8% -> 4.8%)
+        normalized = re.sub(r'(\d+),(\d+)', r'\1.\2', normalized)
+        
+        # Удаляем маркировки (без змж, мжд, бзмж, гост и т.д.)
+        markings = ['без змж', 'мжд', 'бзмж', 'гост', 'без', 'змж']
+        for marking in markings:
+            normalized = re.sub(rf'\b{re.escape(marking)}\b', '', normalized, flags=re.IGNORECASE)
+        
+        # Нормализуем пробелы перед единицами измерения (130 г -> 130г)
+        normalized = re.sub(r'(\d+)\s+(г|кг|л|мл|м)', r'\1\2', normalized)
+        
+        # Удаляем стоп-слова
+        normalized = self.product_service.remove_stop_words(normalized)
+        
+        # Удаляем предлоги и союзы
+        prepositions = {'с', 'и', 'в', 'на', 'для', 'от', 'до', 'по', 'из', 'к', 'о', 'об', 'со', 'во'}
+        words = normalized.split()
+        words = [w for w in words if w not in prepositions]
+        
+        # Нормализуем дефисы (заменяем на пробелы для лучшего сравнения)
+        normalized = ' '.join(words)
+        normalized = re.sub(r'[-–—]', ' ', normalized)
+        
+        # Удаляем множественные пробелы и запятые
+        normalized = re.sub(r'\s+', ' ', normalized)
+        normalized = re.sub(r',\s*,', ',', normalized)  # Удаляем двойные запятые
+        normalized = re.sub(r'\s*,\s*', ' ', normalized)  # Заменяем запятые на пробелы
+        normalized = re.sub(r'\s+', ' ', normalized).strip()
+        
+        return normalized
+
     def _is_identical_offer(self, source_offer: Dict[str, Any], matched_offer: Dict[str, Any]) -> bool:
         """
         Проверить, идентичны ли два оффера (один и тот же товар в разных магазинах)
         
-        Критерии идентичности:
-        - Очень высокая схожесть названий (fuzzy score >= 95%)
-        - Одинаковая категория
-        - Названия практически идентичны (token_sort_ratio >= 95)
+        Критерии идентичности основаны ТОЛЬКО на названии:
+        - Очень высокая схожесть названий (fuzzy score >= 95% или >= 85% после нормализации)
+        - Полное совпадение после нормализации
         
         Args:
             source_offer: Исходный оффер
@@ -385,46 +439,43 @@ class ShopSearchService:
         if not source_title or not matched_title:
             return False
         
-        # Проверяем категорию
-        source_category = source_offer.get("category_name", "").strip()
-        matched_category = matched_offer.get("category_name", "").strip()
-        
-        if source_category and matched_category and source_category != matched_category:
-            return False
-        
-        # Проверяем схожесть названий через fuzzy matching
-        # Используем token_sort_ratio для проверки идентичности (сортирует слова перед сравнением)
+        # Проверяем схожесть исходных названий через fuzzy matching
         token_sort_score = fuzz.token_sort_ratio(source_title.lower(), matched_title.lower())
-        
-        # Также проверяем полное совпадение после нормализации (убираем стоп-слова)
-        source_clean = self.product_service.remove_stop_words(source_title).lower()
-        matched_clean = self.product_service.remove_stop_words(matched_title).lower()
-        
-        # Если очищенные названия идентичны - точно один товар
-        if source_clean == matched_clean and source_clean:
-            return True
         
         # Если token_sort_ratio очень высокий (>= 95) - считаем идентичными
         if token_sort_score >= 95:
             return True
         
-        # Дополнительная проверка: если оба названия содержат одинаковые ключевые слова
-        # и длина названий близка (разница не более 20%)
-        if source_clean and matched_clean:
-            source_words = set(source_clean.split())
-            matched_words = set(matched_clean.split())
+        # Нормализуем названия для более точного сравнения
+        source_normalized = self._normalize_title_for_identity(source_title)
+        matched_normalized = self._normalize_title_for_identity(matched_title)
+        
+        # Если нормализованные названия идентичны - точно один товар
+        if source_normalized == matched_normalized and source_normalized:
+            return True
+        
+        # Проверяем схожесть нормализованных названий
+        token_sort_norm = fuzz.token_sort_ratio(source_normalized, matched_normalized)
+        token_set_norm = fuzz.token_set_ratio(source_normalized, matched_normalized)
+        
+        # После нормализации порог можно снизить до 85%
+        if token_sort_norm >= 85 or token_set_norm >= 85:
+            return True
+        
+        # Дополнительная проверка: если оба нормализованных названия содержат одинаковые ключевые слова
+        if source_normalized and matched_normalized:
+            source_words = set(source_normalized.split())
+            matched_words = set(matched_normalized.split())
             
             # Если все слова из одного названия есть в другом (или наоборот)
             if source_words and matched_words:
                 if source_words == matched_words:
                     return True
                 
-                # Если одно название полностью содержится в другом (с учетом порядка слов)
-                if len(source_words) == len(matched_words):
-                    # Проверяем через token_set_ratio для более точной оценки
-                    token_set_score = fuzz.token_set_ratio(source_title.lower(), matched_title.lower())
-                    if token_set_score >= 95:
-                        return True
+                # Проверяем через token_set_ratio для более точной оценки
+                token_set_score = fuzz.token_set_ratio(source_title.lower(), matched_title.lower())
+                if token_set_score >= 95:
+                    return True
         
         return False
 
