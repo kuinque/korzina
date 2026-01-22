@@ -51,10 +51,20 @@ class CartManager {
     
     // MARK: - Cart Operations
     func addToCart(product: ProductViewModel) {
+        // Логируем оффер, который добавляется в корзину
+        print("🛒 CartManager: Adding offer to cart:")
+        print("   📦 Name: \(product.name)")
+        print("   💰 Price: \(product.price) ₽")
+        print("   🆔 Offer ID: \(product.offerId ?? -1)")
+        print("   📂 Category: \(product.category ?? "nil")")
+        print("   🖼️ Image URL: \(product.imageURL ?? "nil")")
+        
         if let existingItem = cartItems[product.name] {
             cartItems[product.name] = CartItem(product: product, quantity: existingItem.quantity + 1)
+            print("   ➕ Updated quantity: \(existingItem.quantity + 1)")
         } else {
             cartItems[product.name] = CartItem(product: product, quantity: 1)
+            print("   ➕ New item, quantity: 1")
         }
         updateCartTotal()
         NotificationCenter.default.post(name: CartManager.cartDidChangeNotification, object: nil)
@@ -199,6 +209,7 @@ struct CartItem {
     let product: ProductViewModel
     var quantity: Int
     var originalProductName: String? = nil // Название оригинального товара (для замен в других магазинах)
+    var isIdentical: Bool = false // Флаг, указывающий, что товар идентичен оригинальному (is_identical из API)
     
     var totalPrice: Double {
         return product.price * Double(quantity)

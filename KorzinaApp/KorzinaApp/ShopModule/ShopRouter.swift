@@ -17,13 +17,30 @@ class ShopRouter: ShopRouterProtocol {
     }
     
     func navigateToBasket() {
-        guard let tabBarController = viewController?.tabBarController else { 
+        guard let viewController = viewController else { 
+            print("❌ ShopRouter: viewController is nil")
             return 
         }
-        tabBarController.selectedIndex = 1 // Basket tab index
         
-        // Передаем информацию о магазине через NotificationCenter
+        print("🛒 ShopRouter: navigateToBasket called, shopName: \(shopName)")
+        
+        // Создаем BasketView и пушим через navigation controller
+        let basketView = BasketBuilder.build()
+        
+        // Передаем информацию о магазине через NotificationCenter перед навигацией
         NotificationCenter.default.post(name: NSNotification.Name("NavigateToBasket"), object: nil, userInfo: ["shopName": shopName])
+        
+        // Навигация через navigation controller
+        if let navigationController = viewController.navigationController {
+            print("✅ ShopRouter: Found navigation controller, pushing BasketView")
+            navigationController.pushViewController(basketView, animated: true)
+        } else {
+            print("⚠️ ShopRouter: No navigation controller, presenting modally")
+            // Если нет navigation controller, создаем новый
+            let navController = UINavigationController(rootViewController: basketView)
+            navController.modalPresentationStyle = .fullScreen
+            viewController.present(navController, animated: true)
+        }
     }
 }
 

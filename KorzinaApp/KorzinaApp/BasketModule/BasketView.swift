@@ -29,9 +29,8 @@ class BasketView: UIViewController {
     
     // Cart UI elements
     private let tableView = UITableView()
-    private let cartContainerView = UIView()
-    private let cartTotalLabel = UILabel()
-    private let checkoutButton = UIButton(type: .system)
+    private let orderButton = UIButton(type: .system) // Кнопка "заказать" (как basketButton в MainView/ShopView)
+    private let orderPriceLabel = UILabel() // Цена корзины в кнопке
     
     // Price comparison elements
     private let priceComparisonScrollView = UIScrollView()
@@ -39,13 +38,36 @@ class BasketView: UIViewController {
     private let priceComparisonLabel = UILabel()
     private let myCartLabel = UILabel() // Заголовок "Моя корзина"
     
+    // Background blocks (как в ShopView)
+    private let topWhiteBlock = UIView() // Первый белый блок (верхний)
+    private let bottomWhiteBlock = UIView() // Второй белый блок (нижний)
+    
+    // Header elements (как в ShopView)
+    private let basketTitleLabel = UILabel() // Надпись "корзина" по центру
+    private let backButton = UIButton(type: .system) // Кнопка назад
+    private let menuButton = UIButton(type: .system) // Кнопка меню
+    
     private var cartItems: [CartItem] = []
     private var priceComparisons: [PriceComparison] = []
+    private var shopOrder: [String] = [] // Сохраняем порядок магазинов (без текущего)
     private var selectedShopName: String?
+    
+    // Вычисляем лучшую цену один раз для всех карточек
+    private var bestPrice: Double? {
+        let availablePrices = priceComparisons
+            .filter { $0.isAvailable }
+            .compactMap { $0.totalPrice }
+        return availablePrices.min()
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .white
+        view.backgroundColor = UIColor(hex: "F3F3F3") ?? .systemGray6
+        
+        // Скрываем стандартный navigation bar
+        navigationController?.setNavigationBarHidden(true, animated: false)
+        navigationItem.hidesBackButton = true
+        
         setUpView()
         presenter?.viewDidLoad()
         
@@ -84,100 +106,311 @@ class BasketView: UIViewController {
     
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        // Убеждаемся, что navigation bar скрыт
+        navigationController?.setNavigationBarHidden(true, animated: animated)
         presenter?.viewWillAppear()
     }
     
     private func setUpView() {
-        setUpHead()
-        setUpLogo()
-        setUpPriceComparison()
-        setUpCart() // Добавляем cartContainerView в иерархию сначала
-        setUpTableView() // Затем устанавливаем ограничения для tableView
+        setUpBackgroundBlocks()
+        setUpCustomBackButton()
+        setUpBasketTitle()
+        setUpMenuButton()
+        setUpPriceComparison() // Добавляем scrollview сравнения цен
+        setUpCart() // Сначала создаем cartContainerView
+        setUpTableView() // Затем устанавливаем constraints для tableView, которые ссылаются на cartContainerView
     }
     
-    private func setUpHead() {
-        view.addSubview(topView)
-        topView.translatesAutoresizingMaskIntoConstraints = false
-        topView.backgroundColor = .barColor
-        topView.pinLeft(to: view)
-        topView.pinRight(to: view)
-        topView.pinTop(to: view)
-        topView.setHeight(150)
+    private func setUpBackgroundBlocks() {
+        // Первый белый блок (верхний) - высота 115, нижние углы закруглены
+        topWhiteBlock.backgroundColor = .white
+        topWhiteBlock.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(topWhiteBlock)
+        
+        // Второй белый блок (нижний) - от 7 пикселей ниже первого до конца экрана, верхние углы закруглены
+        bottomWhiteBlock.backgroundColor = .white
+        bottomWhiteBlock.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(bottomWhiteBlock)
+        
+        NSLayoutConstraint.activate([
+            // Первый блок: сверху экрана, высота 115
+            topWhiteBlock.topAnchor.constraint(equalTo: view.topAnchor),
+            topWhiteBlock.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            topWhiteBlock.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            topWhiteBlock.heightAnchor.constraint(equalToConstant: 115),
+            
+            // Второй блок: на 7 пикселей ниже первого, до конца экрана
+            bottomWhiteBlock.topAnchor.constraint(equalTo: topWhiteBlock.bottomAnchor, constant: 7),
+            bottomWhiteBlock.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bottomWhiteBlock.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bottomWhiteBlock.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        
+        // Отправляем белые блоки вниз иерархии, чтобы другие элементы были поверх них
+        view.sendSubviewToBack(bottomWhiteBlock)
+        view.sendSubviewToBack(topWhiteBlock)
+        
+        // Применяем закругления углов после layout
+        view.layoutIfNeeded()
+        DispatchQueue.main.async {
+            self.applyCornerRadiusToBlocks()
+        }
+    }
+    
+    private func setUpCustomBackButton() {
+        // Используем backbutton1 из assets
+        if let backImage = UIImage(named: "backbutton1") {
+            backButton.setImage(backImage, for: .normal)
+        } else {
+            // Fallback на системную иконку, если изображение не найдено
+            backButton.setImage(UIImage(systemName: "chevron.left"), for: .normal)
+        }
+        backButton.tintColor = .black
+        backButton.contentEdgeInsets = .zero
+        backButton.imageEdgeInsets = .zero
+        backButton.contentHorizontalAlignment = .left
+        backButton.contentVerticalAlignment = .center
+        backButton.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(backButton)
+        
+        NSLayoutConstraint.activate([
+            // Такое же расположение как в ShopView (2 пикселя от safeArea сверху, 12 от левого края)
+            backButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 2),
+            backButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            backButton.widthAnchor.constraint(equalToConstant: 50),
+            backButton.heightAnchor.constraint(equalToConstant: 44)
+        ])
+        
+        backButton.addTarget(self, action: #selector(backButtonTapped), for: .touchUpInside)
+    }
+    
+    @objc private func backButtonTapped() {
+        navigationController?.popViewController(animated: true)
+    }
+    
+    private func setUpBasketTitle() {
+        basketTitleLabel.text = "корзина"
+        basketTitleLabel.font = UIFont.onestMedium(size: 22)
+        basketTitleLabel.textColor = .black
+        basketTitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(basketTitleLabel)
+        
+        NSLayoutConstraint.activate([
+            // По центру сверху, на той же высоте что и название магазина в ShopView (9 пикселей от safeArea)
+            basketTitleLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 9),
+            basketTitleLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor)
+        ])
+    }
+    
+    private func setUpMenuButton() {
+        menuButton.setImage(createMenuIcon(), for: .normal)
+        menuButton.tintColor = .black
+        menuButton.translatesAutoresizingMaskIntoConstraints = false
+        menuButton.addTarget(self, action: #selector(menuButtonTapped), for: .touchUpInside)
+        view.addSubview(menuButton)
+        
+        NSLayoutConstraint.activate([
+            menuButton.topAnchor.constraint(equalTo: basketTitleLabel.topAnchor, constant: -5),
+            menuButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 328.5),
+            menuButton.widthAnchor.constraint(equalToConstant: 44),
+            menuButton.heightAnchor.constraint(equalToConstant: 44)
+        ])
+    }
+    
+    @objc private func menuButtonTapped() {
+        let profileView = ProfileBuilder.build()
+        
+        if let navigationController = navigationController {
+            navigationController.pushViewController(profileView, animated: true)
+        } else {
+            // Если нет navigation controller, создаем новый
+            let navController = UINavigationController(rootViewController: profileView)
+            navController.modalPresentationStyle = .fullScreen
+            present(navController, animated: true)
+        }
+    }
+    
+    /// Создает иконку меню (три линии)
+    private func createMenuIcon() -> UIImage {
+        let lineLength: CGFloat = 21
+        let lineWidth: CGFloat = 2
+        let spacing: CGFloat = 4 // Расстояние между линиями
+        let totalHeight = lineWidth * 3 + spacing * 2 // 3 линии + 2 промежутка
+        
+        let size = CGSize(width: lineLength, height: totalHeight)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = UIScreen.main.scale
+        format.opaque = false
+        
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        return renderer.image { context in
+            UIColor.black.setFill()
+            
+            // Первая линия (сверху)
+            let line1Rect = CGRect(x: 0, y: 0, width: lineLength, height: lineWidth)
+            context.cgContext.fill(line1Rect)
+            
+            // Вторая линия (посередине)
+            let line2Rect = CGRect(x: 0, y: lineWidth + spacing, width: lineLength, height: lineWidth)
+            context.cgContext.fill(line2Rect)
+            
+            // Третья линия (снизу)
+            let line3Rect = CGRect(x: 0, y: (lineWidth + spacing) * 2, width: lineLength, height: lineWidth)
+            context.cgContext.fill(line3Rect)
+        }
+    }
+    
+    /// Применяет закругления углов к белым блокам
+    private func applyCornerRadiusToBlocks() {
+        // Первый блок: нижние углы закруглены (cornerRadius = 25)
+        applyCornerRadius(to: topWhiteBlock, topLeft: 0, topRight: 0, bottomLeft: 25, bottomRight: 25)
+        
+        // Второй блок: верхние углы закруглены (cornerRadius = 25)
+        applyCornerRadius(to: bottomWhiteBlock, topLeft: 25, topRight: 25, bottomLeft: 0, bottomRight: 0)
+    }
+    
+    /// Применяет mixed corner radius к view
+    private func applyCornerRadius(to view: UIView, topLeft: CGFloat, topRight: CGFloat, bottomLeft: CGFloat, bottomRight: CGFloat) {
+        guard view.bounds.width > 0 && view.bounds.height > 0 else { return }
+        
+        let bounds = view.bounds
+        let width = bounds.width
+        let height = bounds.height
+        
+        let path = UIBezierPath()
+        
+        // Начинаем с точки на верхней грани (после левого верхнего скругления)
+        path.move(to: CGPoint(x: topLeft, y: 0))
+        
+        // Верхняя грань до правого верхнего угла
+        path.addLine(to: CGPoint(x: width - topRight, y: 0))
+        
+        // Правый верхний угол
+        if topRight > 0 {
+            path.addArc(
+                withCenter: CGPoint(x: width - topRight, y: topRight),
+                radius: topRight,
+                startAngle: -CGFloat.pi / 2,
+                endAngle: 0,
+                clockwise: true
+            )
+        }
+        
+        // Правая грань до правого нижнего угла
+        path.addLine(to: CGPoint(x: width, y: height - bottomRight))
+        
+        // Правый нижний угол
+        if bottomRight > 0 {
+            path.addArc(
+                withCenter: CGPoint(x: width - bottomRight, y: height - bottomRight),
+                radius: bottomRight,
+                startAngle: 0,
+                endAngle: CGFloat.pi / 2,
+                clockwise: true
+            )
+        }
+        
+        // Нижняя грань до левого нижнего угла
+        path.addLine(to: CGPoint(x: bottomLeft, y: height))
+        
+        // Левый нижний угол
+        if bottomLeft > 0 {
+            path.addArc(
+                withCenter: CGPoint(x: bottomLeft, y: height - bottomLeft),
+                radius: bottomLeft,
+                startAngle: CGFloat.pi / 2,
+                endAngle: CGFloat.pi,
+                clockwise: true
+            )
+        }
+        
+        // Левая грань до левого верхнего угла
+        path.addLine(to: CGPoint(x: 0, y: topLeft))
+        
+        // Левый верхний угол
+        if topLeft > 0 {
+            path.addArc(
+                withCenter: CGPoint(x: topLeft, y: topLeft),
+                radius: topLeft,
+                startAngle: CGFloat.pi,
+                endAngle: -CGFloat.pi / 2,
+                clockwise: true
+            )
+        }
+        
+        path.close()
+        
+        // Применяем маску
+        let maskLayer = CAShapeLayer()
+        maskLayer.frame = bounds
+        maskLayer.path = path.cgPath
+        view.layer.mask = maskLayer
+        view.layer.masksToBounds = true
+    }
+    
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // Применяем закругления углов после layout
+        applyCornerRadiusToBlocks()
+        
+        // Обновляем frame градиента на кнопке "заказать"
+        if let gradientLayer = orderButton.layer.sublayers?.first(where: { $0 is CAGradientLayer }) as? CAGradientLayer {
+            gradientLayer.frame = orderButton.bounds
+        }
+        
+        // Убеждаемся, что кнопка "заказать" всегда поверх всех элементов
+        view.bringSubviewToFront(orderButton)
     }
     
     func setShopHeader(for shopName: String) {
         print("BasketView: Setting header for shop: \(shopName)")
-        // В корзине просто оставляем стандартный фон
-        topView.backgroundColor = .barColor
-    }
-    
-    private func setUpLogo() {
-        logo = UIImageView(image: UIImage(named: "logo"))
-        logo.translatesAutoresizingMaskIntoConstraints = false
-        logo.contentMode = .scaleAspectFit
-        topView.addSubview(logo)
-        logo.setWidth(120 * 1.43)
-        logo.setHeight(120)
-        logo.pinTop(to: topView, 25)
-        logo.pinLeft(to: topView, 25)
-        
-        logoName = UIImageView(image: UIImage(named: "name"))
-        logoName.translatesAutoresizingMaskIntoConstraints = false
-        logoName.contentMode = .scaleAspectFit
-        topView.addSubview(logoName)
-        logoName.setWidth(35 * 5.26)
-        logoName.setHeight(35)
-        logoName.pinTop(to: topView, 70)
-        logoName.pinLeft(to: logo.trailingAnchor, -45)
+        // Заголовок уже установлен в setUpBasketTitle
     }
     
     private func setUpPriceComparison() {
         // Price comparison label
-        priceComparisonLabel.text = "Сравнение стоимости корзины"
-        priceComparisonLabel.font = UIFont.systemFont(ofSize: 22, weight: .semibold)
-        priceComparisonLabel.textColor = .black
+        priceComparisonLabel.text = "Умное сравнение"
+        priceComparisonLabel.font = UIFont.onestMedium(size: 22)
+        priceComparisonLabel.textColor = UIColor(hex: "0D0D0D") ?? .black
         priceComparisonLabel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(priceComparisonLabel)
         
-        // My cart label
-        myCartLabel.text = "Моя корзина"
-        myCartLabel.font = UIFont.systemFont(ofSize: 22, weight: .semibold)
-        myCartLabel.textColor = .black
-        myCartLabel.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(myCartLabel)
+        // My cart label - больше не используется, убрано
         
         // Horizontal scroll view for price comparisons
         priceComparisonScrollView.showsHorizontalScrollIndicator = false
         priceComparisonScrollView.translatesAutoresizingMaskIntoConstraints = false
+        priceComparisonScrollView.clipsToBounds = false // Отключаем обрезку, чтобы овалы не обрезались сверху
         view.addSubview(priceComparisonScrollView)
         
         // Stack view for comparison cards
         priceComparisonStackView.axis = .horizontal
         priceComparisonStackView.spacing = 12
-        priceComparisonStackView.alignment = .fill
-        priceComparisonStackView.distribution = .fillEqually
+        priceComparisonStackView.alignment = .center
+        priceComparisonStackView.distribution = .fill
         priceComparisonStackView.translatesAutoresizingMaskIntoConstraints = false
+        priceComparisonStackView.clipsToBounds = false // Отключаем обрезку, чтобы овалы не обрезались
         priceComparisonScrollView.addSubview(priceComparisonStackView)
         
         NSLayoutConstraint.activate([
-            priceComparisonLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            priceComparisonLabel.topAnchor.constraint(equalTo: topView.bottomAnchor, constant: 16),
+            // Заголовок "Сравнение стоимости корзины" - от нижнего белого блока
+            priceComparisonLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 11),
+            priceComparisonLabel.topAnchor.constraint(equalTo: bottomWhiteBlock.topAnchor, constant: 12),
             priceComparisonLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             
+            // ScrollView для карточек сравнения
             priceComparisonScrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             priceComparisonScrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            priceComparisonScrollView.topAnchor.constraint(equalTo: priceComparisonLabel.bottomAnchor, constant: 8),
-            priceComparisonScrollView.heightAnchor.constraint(equalToConstant: 120),
+            priceComparisonScrollView.topAnchor.constraint(equalTo: priceComparisonLabel.bottomAnchor, constant: 4), // Чуть выше
+            // Увеличиваем высоту scrollview, чтобы овалы (поднятые на -8px) полностью помещались
+            priceComparisonScrollView.heightAnchor.constraint(equalToConstant: 65), // 51 (высота карточки) + 8 (отступ овала)
             
+            // StackView внутри ScrollView
             priceComparisonStackView.leadingAnchor.constraint(equalTo: priceComparisonScrollView.leadingAnchor, constant: 16),
             priceComparisonStackView.trailingAnchor.constraint(equalTo: priceComparisonScrollView.trailingAnchor, constant: -16),
-            priceComparisonStackView.topAnchor.constraint(equalTo: priceComparisonScrollView.topAnchor),
+            priceComparisonStackView.topAnchor.constraint(equalTo: priceComparisonScrollView.topAnchor, constant: 10), // Отступ сверху для овалов (соответствует -10 в constraints овалов)
             priceComparisonStackView.bottomAnchor.constraint(equalTo: priceComparisonScrollView.bottomAnchor),
-            priceComparisonStackView.heightAnchor.constraint(equalTo: priceComparisonScrollView.heightAnchor),
-            
-            myCartLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            myCartLabel.topAnchor.constraint(equalTo: priceComparisonScrollView.bottomAnchor, constant: 16),
-            myCartLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16)
+            priceComparisonStackView.heightAnchor.constraint(equalToConstant: 51) // Фиксированная высота для карточек
         ])
     }
     
@@ -186,57 +419,121 @@ class BasketView: UIViewController {
         tableView.dataSource = self
         tableView.register(BasketItemCell.self, forCellReuseIdentifier: "BasketItemCell")
         tableView.separatorStyle = .none
-        tableView.backgroundColor = .white
+        tableView.backgroundColor = .clear
         tableView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(tableView)
         
         NSLayoutConstraint.activate([
-            tableView.topAnchor.constraint(equalTo: myCartLabel.bottomAnchor, constant: 8),
+            // tableView начинается от scrollview сравнения цен
+            tableView.topAnchor.constraint(equalTo: priceComparisonScrollView.bottomAnchor, constant: 20),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            tableView.bottomAnchor.constraint(equalTo: cartContainerView.topAnchor, constant: -8)
+            tableView.bottomAnchor.constraint(equalTo: orderButton.topAnchor, constant: -8)
         ])
     }
     
     private func setUpCart() {
-        // Cart container
-        cartContainerView.backgroundColor = UIColor.primaryColor
-        cartContainerView.layer.cornerRadius = 25
-        cartContainerView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(cartContainerView)
+        // Кнопка "заказать" (как basketButton в MainView/ShopView)
+        orderButton.setTitle("заказать", for: .normal)
+        orderButton.titleLabel?.font = UIFont.onestMedium(size: 22)
+        orderButton.setTitleColor(.white, for: .normal)
+        // Убираем сплошной цвет, будет градиент
+        orderButton.backgroundColor = .clear
+        orderButton.layer.cornerRadius = 25
+        orderButton.layer.cornerCurve = .continuous
+        orderButton.clipsToBounds = true
         
-        // Cart total label
-        cartTotalLabel.text = "0 ₽"
-        cartTotalLabel.textColor = .white
-        cartTotalLabel.font = UIFont.systemFont(ofSize: 18, weight: .semibold)
-        cartTotalLabel.textAlignment = .center
-        cartTotalLabel.translatesAutoresizingMaskIntoConstraints = false
-        cartContainerView.addSubview(cartTotalLabel)
+        // Устанавливаем отступ текста от левого края кнопки
+        orderButton.contentHorizontalAlignment = .left
+        orderButton.titleEdgeInsets = UIEdgeInsets(top: 0, left: 17, bottom: 0, right: 0)
+      
+        // Добавляем цену корзины слева от стрелочки
+        orderPriceLabel.text = "0₽"
+        orderPriceLabel.font = UIFont.onestMedium(size: 20)
+        orderPriceLabel.textColor = .white
+        orderPriceLabel.translatesAutoresizingMaskIntoConstraints = false
+        orderButton.addSubview(orderPriceLabel)
         
-        // Checkout button
-        checkoutButton.setTitle("Оформить заказ", for: .normal)
-        checkoutButton.setTitleColor(.white, for: .normal)
-        checkoutButton.titleLabel?.font = UIFont.systemFont(ofSize: 16, weight: .medium)
-        checkoutButton.backgroundColor = UIColor.white.withAlphaComponent(0.2)
-        checkoutButton.layer.cornerRadius = 20
-        checkoutButton.translatesAutoresizingMaskIntoConstraints = false
-        checkoutButton.addTarget(self, action: #selector(checkoutButtonTapped), for: .touchUpInside)
-        cartContainerView.addSubview(checkoutButton)
+        // Добавляем картинку check2 справа в кнопке
+        if let checkImage = UIImage(named: "check2") {
+            let checkImageView = UIImageView(image: checkImage)
+            checkImageView.contentMode = .scaleAspectFit
+            checkImageView.translatesAutoresizingMaskIntoConstraints = false
+            orderButton.addSubview(checkImageView)
         
         NSLayoutConstraint.activate([
-            cartContainerView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            cartContainerView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            cartContainerView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
-            cartContainerView.heightAnchor.constraint(equalToConstant: 50),
-            
-            cartTotalLabel.leadingAnchor.constraint(equalTo: cartContainerView.leadingAnchor, constant: 20),
-            cartTotalLabel.centerYAnchor.constraint(equalTo: cartContainerView.centerYAnchor),
-            
-            checkoutButton.trailingAnchor.constraint(equalTo: cartContainerView.trailingAnchor, constant: -20),
-            checkoutButton.centerYAnchor.constraint(equalTo: cartContainerView.centerYAnchor),
-            checkoutButton.widthAnchor.constraint(equalToConstant: 140),
-            checkoutButton.heightAnchor.constraint(equalToConstant: 40)
+                // Цена корзины слева от стрелочки
+                orderPriceLabel.trailingAnchor.constraint(equalTo: checkImageView.leadingAnchor, constant: -8),
+                orderPriceLabel.centerYAnchor.constraint(equalTo: orderButton.centerYAnchor),
+                
+                // Стрелочка справа
+                checkImageView.trailingAnchor.constraint(equalTo: orderButton.trailingAnchor, constant: -22),
+                checkImageView.centerYAnchor.constraint(equalTo: orderButton.centerYAnchor),
+                checkImageView.widthAnchor.constraint(equalToConstant: 10),
+                checkImageView.heightAnchor.constraint(equalToConstant: 16)
+            ])
+        }
+      
+        orderButton.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(orderButton)
+        
+        NSLayoutConstraint.activate([
+            orderButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 77),
+            orderButton.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -34),
+            orderButton.widthAnchor.constraint(equalToConstant: 242),
+            orderButton.heightAnchor.constraint(equalToConstant: 53)
         ])
+        
+        // Добавляем действие при нажатии
+        orderButton.addTarget(self, action: #selector(checkoutButtonTapped), for: .touchUpInside)
+        
+        // Применяем градиент к кнопке
+        applyGradientToOrderButton(orderButton)
+        
+        // Обновляем цену корзины
+        updateOrderPrice()
+    }
+    
+    /// Применяет градиент к кнопке "заказать"
+    private func applyGradientToOrderButton(_ button: UIButton) {
+        applyGradientToButton(button, cornerRadius: 25)
+    }
+    
+    /// Применяет градиент к кнопке с указанным радиусом скругления
+    private func applyGradientToButton(_ button: UIButton, cornerRadius: CGFloat) {
+        // Удаляем старый градиент, если есть
+        button.layer.sublayers?.forEach { layer in
+            if layer is CAGradientLayer {
+                layer.removeFromSuperlayer()
+            }
+        }
+        
+        // Убираем сплошной цвет фона
+        button.backgroundColor = .clear
+        
+        // Создаем градиентный слой
+        let gradientLayer = CAGradientLayer()
+        gradientLayer.colors = [
+            UIColor(hex: "FF8733")?.cgColor ?? UIColor.orange.cgColor,
+            UIColor(hex: "FE6900")?.cgColor ?? UIColor.orange.cgColor
+        ]
+        gradientLayer.startPoint = CGPoint(x: 0, y: 0.5) // Слева
+        gradientLayer.endPoint = CGPoint(x: 1, y: 0.5) // Справа
+        gradientLayer.cornerRadius = cornerRadius
+        gradientLayer.masksToBounds = true
+        gradientLayer.frame = button.bounds
+        
+        button.layer.insertSublayer(gradientLayer, at: 0)
+        // Обновляем frame градиента после layout
+        DispatchQueue.main.async {
+            gradientLayer.frame = button.bounds
+        }
+    }
+    
+    /// Обновляет цену в кнопке "заказать"
+    private func updateOrderPrice() {
+        let total = CartManager.shared.getCartTotal()
+        orderPriceLabel.text = "\(Int(total))₽"
     }
     
     @objc private func checkoutButtonTapped() {
@@ -281,6 +578,7 @@ class BasketView: UIViewController {
         }
         
         // Отправляем уведомление о новом заказе
+        print("📦 BasketView: Sending NewOrderCreated notification for shop: \(shopName), total: \(orderTotal) ₽")
         NotificationCenter.default.post(
             name: NSNotification.Name("NewOrderCreated"),
             object: nil,
@@ -300,7 +598,7 @@ class BasketView: UIViewController {
         // Показываем подтверждение
         showAlert(title: "Заказ оформлен", message: "Ваш заказ из магазина \"\(shopName)\" на сумму \(String(format: "%.2f", orderTotal)) ₽ добавлен в историю заказов")
         
-        print("✅ Order created: \(shopName), total: \(orderTotal) ₽")
+        print("✅ BasketView: Order created and notification sent: \(shopName), total: \(orderTotal) ₽")
     }
     
     private func showAlert(title: String, message: String) {
@@ -322,16 +620,56 @@ extension BasketView: BasketViewProtocol {
     }
     
     func updateCartTotal(_ total: Double) {
-        cartTotalLabel.text = String(format: "%.2f ₽", total)
+        orderPriceLabel.text = "\(Int(total))₽"
     }
     
     func displayPriceComparisons(_ comparisons: [PriceComparison]) {
-        // Сортируем по цене (сначала дешевые)
-        let sortedComparisons = comparisons.sorted { c1, c2 in
-            let price1 = c1.totalPrice ?? Double.infinity
-            let price2 = c2.totalPrice ?? Double.infinity
-            return price1 < price2
+        // Сортируем: текущий магазин первый, остальные по выгоде (от меньшей цены к большей)
+        // При переключении между магазинами порядок остальных магазинов сохраняется
+        let sortedComparisons: [PriceComparison]
+        
+        // Находим текущий магазин
+        let currentShop = comparisons.first(where: { $0.isCurrentShop })
+        let otherShops = comparisons.filter { !$0.isCurrentShop }
+        
+        if shopOrder.isEmpty || shopOrder.count != otherShops.count {
+            // Первая загрузка: сортируем остальные магазины по выгоде
+            let sortedOtherShops = otherShops.sorted { c1, c2 in
+                let price1 = c1.totalPrice ?? Double.infinity
+                let price2 = c2.totalPrice ?? Double.infinity
+                return price1 < price2
+            }
+            // Сохраняем порядок остальных магазинов
+            shopOrder = sortedOtherShops.map { $0.shopName }
+            
+            // Текущий магазин первый, затем остальные по выгоде
+            if let current = currentShop {
+                sortedComparisons = [current] + sortedOtherShops
+            } else {
+                sortedComparisons = sortedOtherShops
+            }
+        } else {
+            // При переключении: сохраняем порядок остальных магазинов
+            let sortedOtherShops = shopOrder.compactMap { shopName in
+                otherShops.first(where: { $0.shopName == shopName })
+            }
+            // Добавляем новые магазины, которых нет в сохраненном порядке (сортируем по выгоде)
+            let existingShopNames = Set(shopOrder)
+            let newShops = otherShops.filter { !existingShopNames.contains($0.shopName) }
+                .sorted { c1, c2 in
+                    let price1 = c1.totalPrice ?? Double.infinity
+                    let price2 = c2.totalPrice ?? Double.infinity
+                    return price1 < price2
+                }
+            
+            // Текущий магазин первый, затем остальные в сохраненном порядке + новые
+            if let current = currentShop {
+                sortedComparisons = [current] + sortedOtherShops + newShops
+            } else {
+                sortedComparisons = sortedOtherShops + newShops
+            }
         }
+        
         priceComparisons = sortedComparisons
         
         // Всегда устанавливаем текущий магазин пользователя как выбранный (если есть)
@@ -358,6 +696,7 @@ extension BasketView: BasketViewProtocol {
             priceComparisonScrollView.isHidden = true
             priceComparisonLabel.isHidden = true
             selectedShopName = nil
+            shopOrder = [] // Очищаем порядок при очистке корзины
             return
         }
         
@@ -384,19 +723,18 @@ extension BasketView: BasketViewProtocol {
         // Определяем, является ли это выбранным магазином
         let isSelectedShop = comparison.shopName == selectedShopName
         
-        if isSelectedShop {
-            // Выделяем выбранный магазин зеленой обводкой
-            cardView.backgroundColor = UIColor.primaryColor?.withAlphaComponent(0.1)
-            cardView.layer.borderWidth = 2
-            cardView.layer.borderColor = UIColor.primaryColor?.cgColor
-        } else {
-            // Серый стиль для всех остальных магазинов
-            cardView.backgroundColor = UIColor.systemGray.withAlphaComponent(0.1)
-            cardView.layer.borderWidth = 1
-            cardView.layer.borderColor = UIColor.systemGray.cgColor
-        }
+        // Определяем, является ли это магазином с лучшей ценой
+        let isBestPrice = comparison.isAvailable && 
+                          comparison.totalPrice != nil && 
+                          comparison.totalPrice == bestPrice
         
-        cardView.layer.cornerRadius = 12
+        // Зеленая обводка и овал "лучшая цена" показываются только если магазин выбран И имеет лучшую цену
+        let showBestPriceIndicator = isSelectedShop && isBestPrice
+        
+        // Овальная карточка 143x51, цвет F3F3F3 (как у карточек товаров в ShopView)
+        cardView.backgroundColor = UIColor(hex: "F3F3F3") ?? .systemGray6
+        cardView.layer.cornerRadius = 25.5 // Половина от 51 для овала
+        cardView.clipsToBounds = false // Отключаем обрезку, чтобы овалы могли выходить за границы и не перекрывались обводкой
         cardView.translatesAutoresizingMaskIntoConstraints = false
         
         // Добавляем возможность тапать по карточке
@@ -405,143 +743,255 @@ extension BasketView: BasketViewProtocol {
         cardView.isUserInteractionEnabled = true
         cardView.tag = priceComparisons.firstIndex(where: { $0.shopName == comparison.shopName }) ?? 0
         
-        // Shop logo image view - растягиваем на всю верхнюю часть
+        // Круг 34x34 с логотипом магазина (в левой части)
+        let logoContainerView = UIView()
+        logoContainerView.backgroundColor = getShopColor(for: comparison.shopName)
+        logoContainerView.layer.cornerRadius = 17 // Половина от 34 для круга
+        logoContainerView.clipsToBounds = true
+        logoContainerView.translatesAutoresizingMaskIntoConstraints = false
+        cardView.addSubview(logoContainerView)
+        
+        // Логотип магазина внутри круга
         let shopLogoImageView = UIImageView()
-        shopLogoImageView.contentMode = .scaleAspectFill
+        shopLogoImageView.contentMode = .scaleAspectFit
         shopLogoImageView.clipsToBounds = true
-        shopLogoImageView.layer.cornerRadius = 10 // Скругляем углы логотипа
         shopLogoImageView.translatesAutoresizingMaskIntoConstraints = false
-        cardView.addSubview(shopLogoImageView)
+        logoContainerView.addSubview(shopLogoImageView)
         
         // Set shop logo based on shop name
         let logoImageName = getShopLogoImageName(for: comparison.shopName)
         shopLogoImageView.image = UIImage(named: logoImageName)
         
-        // Price label (основная цена корзины)
-        let priceLabel = UILabel()
+        // Контейнер для цены доставки и времени доставки (справа от круга)
+        let infoContainerView = UIView()
+        infoContainerView.translatesAutoresizingMaskIntoConstraints = false
+        cardView.addSubview(infoContainerView)
         
-        // Difference label (разница под ценой)
-        let differenceLabel = UILabel()
-        differenceLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
-        differenceLabel.textAlignment = .center
-        differenceLabel.translatesAutoresizingMaskIntoConstraints = false
-        cardView.addSubview(differenceLabel)
+        // Цена корзины (сверху) - показываем реальную цену корзины
+        let deliveryPriceLabel = UILabel()
+        if let price = comparison.totalPrice {
+            deliveryPriceLabel.text = "\(Int(price))₽"
+        } else {
+            deliveryPriceLabel.text = "—"
+        }
+        deliveryPriceLabel.font = UIFont.onestMedium(size: 18.23)
+        deliveryPriceLabel.textColor = UIColor(hex: "4E4E4E") ?? .darkGray
+        deliveryPriceLabel.translatesAutoresizingMaskIntoConstraints = false
+        infoContainerView.addSubview(deliveryPriceLabel)
         
-        // Получаем цену ВЫБРАННОГО магазина для сравнения
+        // Время доставки (внизу от цены)
+        let deliveryTimeLabel = UILabel()
+        deliveryTimeLabel.text = "25-35 мин" // Можно заменить на реальное время доставки
+        deliveryTimeLabel.font = UIFont.onestMedium(size: 12)
+        deliveryTimeLabel.textColor = UIColor(hex: "B1B0B0") ?? .lightGray
+        deliveryTimeLabel.translatesAutoresizingMaskIntoConstraints = false
+        infoContainerView.addSubview(deliveryTimeLabel)
+        
+        // Овал "лучшая цена" (показывается только если магазин выбран И имеет лучшую цену)
+        let bestPriceOval = UIView()
+        bestPriceOval.backgroundColor = UIColor(hex: "5FAF2D") ?? .systemGreen
+        bestPriceOval.layer.cornerRadius = 9.5 // Половина от высоты для овала
+        bestPriceOval.clipsToBounds = true
+        bestPriceOval.translatesAutoresizingMaskIntoConstraints = false
+        bestPriceOval.isHidden = !showBestPriceIndicator // Показываем только для выбранного магазина с лучшей ценой
+        bestPriceOval.layer.zPosition = 1000 // Устанавливаем высокий zPosition, чтобы овал был поверх обводки
+        cardView.addSubview(bestPriceOval)
+        
+        // Текст "лучшая цена"
+        let bestPriceLabel = UILabel()
+        bestPriceLabel.text = "лучшая цена"
+        bestPriceLabel.font = UIFont.onestMedium(size: 11)
+        bestPriceLabel.textColor = .white
+        bestPriceLabel.textAlignment = .center
+        bestPriceLabel.translatesAutoresizingMaskIntoConstraints = false
+        bestPriceOval.addSubview(bestPriceLabel)
+        
+        // Овал с разницей в цене (в верхней правой части карточки)
+        let priceDifferenceOval = UIView()
+        priceDifferenceOval.layer.cornerRadius = 9.5 // Половина от высоты для овала
+        priceDifferenceOval.clipsToBounds = true
+        priceDifferenceOval.translatesAutoresizingMaskIntoConstraints = false
+        priceDifferenceOval.layer.zPosition = 1000 // Устанавливаем высокий zPosition, чтобы овал был поверх обводки
+        cardView.addSubview(priceDifferenceOval)
+        
+        // Текст разницы в цене
+        let priceDifferenceLabel = UILabel()
+        priceDifferenceLabel.font = UIFont.onestMedium(size: 10)
+        priceDifferenceLabel.textColor = .white
+        priceDifferenceLabel.textAlignment = .center
+        priceDifferenceLabel.translatesAutoresizingMaskIntoConstraints = false
+        priceDifferenceOval.addSubview(priceDifferenceLabel)
+        
+        // Вычисляем разницу в цене относительно выбранного магазина
+        var priceDifference: Double? = nil
+        var isCheaper = false
+        
+        if let selectedShop = selectedShopName, selectedShop != comparison.shopName {
+            // Получаем цену выбранного магазина
         let selectedShopPrice: Double?
-        if let selectedShop = selectedShopName {
-            // Проверяем, является ли выбранный магазин текущим магазином пользователя
-            let isCurrentShop = priceComparisons.first(where: { $0.shopName == selectedShop })?.isCurrentShop ?? false
+            let isSelectedCurrentShop = priceComparisons.first(where: { $0.shopName == selectedShop })?.isCurrentShop ?? false
             
-            if isCurrentShop {
-                // Для текущего магазина берем цену из реальной корзины
+            if isSelectedCurrentShop {
                 selectedShopPrice = CartManager.shared.getCartTotal()
-                print("💰 Using current cart total for comparison: \(selectedShopPrice ?? 0) ₽")
             } else {
-                // Для других магазинов берем цену из кэша
                 let cachedCarts = CartManager.shared.getCachedShopCarts()
                 selectedShopPrice = cachedCarts.first(where: { $0.shopName == selectedShop })?.totalPrice
-                print("💰 Using cached price for \(selectedShop): \(selectedShopPrice ?? 0) ₽")
             }
-        } else {
-            selectedShopPrice = CartManager.shared.getCartTotal()
-            print("💰 Using default cart total: \(selectedShopPrice ?? 0) ₽")
+            
+            // Вычисляем разницу
+            if let currentPrice = comparison.totalPrice, let selectedPrice = selectedShopPrice {
+                priceDifference = currentPrice - selectedPrice
+                isCheaper = priceDifference! < 0
+            }
         }
         
-        // Для текущего магазина используем реальную цену корзины, а не цену из comparison
-        let actualPrice: Double?
-        if comparison.isCurrentShop {
-            actualPrice = CartManager.shared.getCartTotal()
-            print("🏪 \(comparison.shopName) (CURRENT): actualPrice=\(actualPrice ?? 0) ₽ (from real cart)")
-        } else {
-            actualPrice = comparison.totalPrice
-            print("🏪 \(comparison.shopName): actualPrice=\(actualPrice ?? 0) ₽ (from API)")
-        }
-        
-        if let price = actualPrice, let basePrice = selectedShopPrice, basePrice > 0 {
-            let difference = price - basePrice
-            
-            print("   base=\(basePrice) ₽, diff=\(difference) ₽")
-            
-            // Всегда показываем цену корзины
-            priceLabel.text = String(format: "%.0f ₽", price)
-            priceLabel.textColor = .systemGray
-            
-            if abs(difference) < 0.01 {
-                // Это выбранный магазин (разница около нуля) - скрываем разницу
-                differenceLabel.isHidden = true
-                print("   ✅ Selected shop (zero difference)")
-            } else if difference > 0 {
-                // Дороже выбранного магазина
-                differenceLabel.text = String(format: "+%.0f ₽", difference)
-                differenceLabel.textColor = .systemRed
-                differenceLabel.isHidden = false
-                print("   📈 More expensive by \(difference) ₽")
+        // Настраиваем овал с разницей в цене (скрываем только если выбран магазин с лучшей ценой)
+        if showBestPriceIndicator {
+            // Скрываем овал разницы, если это выбранный магазин с лучшей ценой (показываем только "лучшая цена")
+            priceDifferenceOval.isHidden = true
+        } else if let difference = priceDifference, abs(difference) > 0.01 {
+            // Показываем разницу
+            if isCheaper {
+                priceDifferenceOval.backgroundColor = UIColor(hex: "5FAF2D") ?? .systemGreen
+                priceDifferenceLabel.text = "-\(Int(abs(difference)))₽"
             } else {
-                // Дешевле выбранного магазина
-                differenceLabel.text = String(format: "%.0f ₽", difference)
-                differenceLabel.textColor = .systemGreen
-                differenceLabel.isHidden = false
-                print("   📉 Cheaper by \(difference) ₽")
+                priceDifferenceOval.backgroundColor = UIColor(hex: "E0001A") ?? .systemRed
+                priceDifferenceLabel.text = "+\(Int(difference))₽"
             }
-        } else if let price = actualPrice {
-            // Есть цена, но нет выбранного магазина для сравнения
-            priceLabel.text = String(format: "%.0f ₽", price)
-            priceLabel.textColor = .systemGray
-            differenceLabel.isHidden = true
+            priceDifferenceOval.isHidden = false
         } else {
-            priceLabel.text = "Не найдено"
-            priceLabel.textColor = .systemGray
-            differenceLabel.isHidden = true
-            print("   ⚠️ No price available")
+            // Скрываем овал, если это выбранный магазин или разница незначительна
+            priceDifferenceOval.isHidden = true
         }
-        priceLabel.font = UIFont.systemFont(ofSize: 22, weight: .bold)
-        priceLabel.textAlignment = .center
-        priceLabel.translatesAutoresizingMaskIntoConstraints = false
-        cardView.addSubview(priceLabel)
-        
-        // Единый размер логотипа для всех магазинов
-        let logoHeight: CGFloat = 40
-        let logoTopMargin: CGFloat = 10
         
         NSLayoutConstraint.activate([
-            cardView.widthAnchor.constraint(equalToConstant: 140),
+            // Размеры карточки: 143x51
+            cardView.widthAnchor.constraint(equalToConstant: 143),
+            cardView.heightAnchor.constraint(equalToConstant: 51),
             
-            // Shop logo constraints - адаптивный размер
-            shopLogoImageView.topAnchor.constraint(equalTo: cardView.topAnchor, constant: logoTopMargin),
-            shopLogoImageView.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 8),
-            shopLogoImageView.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -8),
-            shopLogoImageView.heightAnchor.constraint(equalToConstant: logoHeight),
+            // Круг с логотипом: 34x34, слева с отступом
+            logoContainerView.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 8),
+            logoContainerView.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
+            logoContainerView.widthAnchor.constraint(equalToConstant: 34),
+            logoContainerView.heightAnchor.constraint(equalToConstant: 34),
             
-            // Price label - под логотипом с большим отступом
-            priceLabel.topAnchor.constraint(equalTo: shopLogoImageView.bottomAnchor, constant: 16),
-            priceLabel.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 8),
-            priceLabel.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -8),
+            // Логотип внутри круга (с отступами)
+            shopLogoImageView.centerXAnchor.constraint(equalTo: logoContainerView.centerXAnchor),
+            shopLogoImageView.centerYAnchor.constraint(equalTo: logoContainerView.centerYAnchor),
+            shopLogoImageView.widthAnchor.constraint(equalToConstant: 24),
+            shopLogoImageView.heightAnchor.constraint(equalToConstant: 24),
             
-            // Difference label - под ценой
-            differenceLabel.topAnchor.constraint(equalTo: priceLabel.bottomAnchor, constant: 4),
-            differenceLabel.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 8),
-            differenceLabel.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -8),
-            differenceLabel.bottomAnchor.constraint(lessThanOrEqualTo: cardView.bottomAnchor, constant: -12)
+            // Контейнер с информацией справа от круга (сдвинут правее)
+            infoContainerView.leadingAnchor.constraint(equalTo: logoContainerView.trailingAnchor, constant: 16),
+            infoContainerView.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -8),
+            infoContainerView.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
+            
+            // Цена доставки сверху
+            deliveryPriceLabel.topAnchor.constraint(equalTo: infoContainerView.topAnchor),
+            deliveryPriceLabel.leadingAnchor.constraint(equalTo: infoContainerView.leadingAnchor), // Левый край совпадает с левым краем времени доставки
+            deliveryPriceLabel.trailingAnchor.constraint(equalTo: infoContainerView.trailingAnchor),
+            
+            // Время доставки внизу от цены
+            deliveryTimeLabel.topAnchor.constraint(equalTo: deliveryPriceLabel.bottomAnchor, constant: 2),
+            deliveryTimeLabel.leadingAnchor.constraint(equalTo: infoContainerView.leadingAnchor), // Левый край совпадает с левым краем цены
+            deliveryTimeLabel.trailingAnchor.constraint(equalTo: infoContainerView.trailingAnchor),
+            deliveryTimeLabel.bottomAnchor.constraint(equalTo: infoContainerView.bottomAnchor),
+            
+            // Овал "лучшая цена" в верхней правой части карточки (там же, где овал с разницей цены)
+            bestPriceOval.topAnchor.constraint(equalTo: cardView.topAnchor, constant: -10), // Поднимаем выше
+            bestPriceOval.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: 8), // Сдвигаем правее
+            bestPriceOval.heightAnchor.constraint(equalToConstant: 19),
+            bestPriceOval.widthAnchor.constraint(greaterThanOrEqualToConstant: 19), // Минимальная ширина
+            
+            // Текст "лучшая цена" внутри овала
+            bestPriceLabel.centerYAnchor.constraint(equalTo: bestPriceOval.centerYAnchor),
+            bestPriceLabel.leadingAnchor.constraint(equalTo: bestPriceOval.leadingAnchor, constant: 8),
+            bestPriceLabel.trailingAnchor.constraint(equalTo: bestPriceOval.trailingAnchor, constant: -8),
+            bestPriceOval.widthAnchor.constraint(equalTo: bestPriceLabel.widthAnchor, constant: 16), // Ширина = ширина текста + отступы (8+8)
+            
+            // Овал с разницей в цене в верхней правой части (скрыт, если это лучшая цена)
+            priceDifferenceOval.topAnchor.constraint(equalTo: cardView.topAnchor, constant: -10), // Поднимаем выше
+            priceDifferenceOval.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: 8), // Сдвигаем правее
+            priceDifferenceOval.heightAnchor.constraint(equalToConstant: 19),
+            priceDifferenceOval.widthAnchor.constraint(greaterThanOrEqualToConstant: 19), // Минимальная ширина
+            
+            // Текст разницы в цене внутри овала - определяет ширину овала
+            priceDifferenceLabel.centerYAnchor.constraint(equalTo: priceDifferenceOval.centerYAnchor),
+            priceDifferenceLabel.leadingAnchor.constraint(equalTo: priceDifferenceOval.leadingAnchor, constant: 8),
+            priceDifferenceLabel.trailingAnchor.constraint(equalTo: priceDifferenceOval.trailingAnchor, constant: -8),
+            priceDifferenceOval.widthAnchor.constraint(equalTo: priceDifferenceLabel.widthAnchor, constant: 16) // Ширина = ширина текста + отступы (8+8)
         ])
+        
+        // Создаем отдельный слой для обводки, который будет под овалами
+        let borderLayer = CAShapeLayer()
+        borderLayer.frame = cardView.bounds
+        borderLayer.path = UIBezierPath(roundedRect: cardView.bounds, cornerRadius: 25.5).cgPath
+        borderLayer.fillColor = UIColor.clear.cgColor
+        
+        if showBestPriceIndicator {
+            // Зеленая обводка для выбранного магазина с лучшей ценой
+            borderLayer.strokeColor = (UIColor(hex: "5FAF2D") ?? UIColor.systemGreen).cgColor
+            borderLayer.lineWidth = 1
+        } else if isSelectedShop {
+            // Серая обводка для выбранного магазина (без лучшей цены)
+            borderLayer.strokeColor = (UIColor(hex: "9A9A9A") ?? UIColor.systemGray).cgColor
+            borderLayer.lineWidth = 1
+        } else {
+            borderLayer.strokeColor = UIColor.clear.cgColor
+            borderLayer.lineWidth = 0
+        }
+        
+        // Добавляем border layer в самый низ стека слоев
+        cardView.layer.insertSublayer(borderLayer, at: 0)
+        
+        // Обновляем frame border layer после установки constraints
+        DispatchQueue.main.async {
+            borderLayer.frame = cardView.bounds
+            borderLayer.path = UIBezierPath(roundedRect: cardView.bounds, cornerRadius: 25.5).cgPath
+        }
+        
+        // Убеждаемся, что овалы находятся поверх обводки карточки
+        cardView.bringSubviewToFront(bestPriceOval)
+        cardView.bringSubviewToFront(priceDifferenceOval)
         
         return cardView
     }
     
     private func getShopLogoImageName(for shopName: String) -> String {
-        switch shopName {
-        case "Пятёрочка":
-            return "pyat_select"
-        case "Лента":
-            return "lenta_line"
+        let mapping: [String: String] = [
+            "Ашан": "Логотип Ашана",
+            "Перекрёсток": "Логотип перекресток",
+            "Лента": "Логотип Лента",
+            "Магнит": "Логотип Магнит",
+            "Дикси": "Логотип Дикси",
+            "Азбука Вкуса": "Логотив Азбука Вкуса",
+            "Метро": "Логотип метро",
+            "Пятёрочка": "Логотип Пятерочка"
+        ]
+        return mapping[shopName] ?? "Логотип Пятерочка"
+    }
+    
+    /// Возвращает цвет для магазина
+    private func getShopColor(for storeName: String) -> UIColor {
+        switch storeName {
         case "Ашан":
-            return "ashan_line"
-        case "Магнит":
-            return "magnit_line"
+            return UIColor(hex: "#E0001A") ?? .systemRed
         case "Перекрёсток":
-            return "perek_line"
+            return UIColor(hex: "#00A651") ?? .systemGreen
+        case "Лента":
+            return UIColor(hex: "#1E88E5") ?? .systemBlue
+        case "Магнит":
+            return UIColor(hex: "#FF0000") ?? .systemRed
+        case "Дикси":
+            return UIColor(hex: "#F17D0A") ?? .systemOrange
+        case "Азбука Вкуса":
+            return UIColor(hex: "#134727") ?? .systemGreen
+        case "Метро":
+            return UIColor(hex: "#1B4A88") ?? .systemBlue
+        case "Пятёрочка":
+            return UIColor(hex: "#FE0006") ?? .systemRed
         default:
-            return "pyat_select" // Default fallback
+            return UIColor.primaryColor ?? .systemGray
         }
     }
     
@@ -571,7 +1021,7 @@ extension BasketView: BasketViewProtocol {
             let total = CartManager.shared.getCartTotal()
             cartItems = items
             tableView.reloadData()
-            cartTotalLabel.text = String(format: "%.2f ₽", total)
+            orderPriceLabel.text = "\(Int(total))₽"
             print("📦 Loaded \(items.count) items from current cart")
             return
         }
@@ -585,29 +1035,19 @@ extension BasketView: BasketViewProtocol {
             let total = CartManager.shared.getCartTotal()
             cartItems = items
             tableView.reloadData()
-            cartTotalLabel.text = String(format: "%.2f ₽", total)
+            orderPriceLabel.text = "\(Int(total))₽"
             
-            print("📦 Loaded \(items.count) items from CURRENT CART (\(selectedShop)):")
-            for (index, item) in cartItems.enumerated() {
-                print("  [\(index)] \(item.product.name)")
-                print("      Price: \(item.product.price) ₽")
-                print("      Image: \(item.product.imageURL?.prefix(50) ?? "nil")...")
-            }
+            print("📦 Loaded \(items.count) items from CURRENT CART (\(selectedShop))")
         } else {
             // Для других магазинов показываем кэш
             let cachedCarts = CartManager.shared.getCachedShopCarts()
             if let selectedCart = cachedCarts.first(where: { $0.shopName == selectedShop }) {
                 cartItems = selectedCart.items
                 
-                print("📦 Loaded \(cartItems.count) items from CACHED \(selectedShop):")
-                for (index, item) in cartItems.enumerated() {
-                    print("  [\(index)] \(item.product.name)")
-                    print("      Price: \(item.product.price) ₽")
-                    print("      Image: \(item.product.imageURL?.prefix(50) ?? "nil")...")
-                }
+                print("📦 Loaded \(cartItems.count) items from CACHED \(selectedShop)")
                 
                 tableView.reloadData()
-                cartTotalLabel.text = String(format: "%.2f ₽", selectedCart.totalPrice)
+                orderPriceLabel.text = "\(Int(selectedCart.totalPrice))₽"
             } else {
                 print("⚠️ No cached cart found for \(selectedShop)")
                 cartItems = []
@@ -663,10 +1103,60 @@ extension BasketView: BasketViewProtocol {
             updatedComparisons.append(currentShopComparison)
         }
         
-        // Сортируем по цене
-        updatedComparisons.sort { ($0.totalPrice ?? Double.infinity) < ($1.totalPrice ?? Double.infinity) }
+        // Сохраняем порядок магазинов перед обновлением
+        // Используем сохраненный порядок, если он есть, иначе сохраняем текущий
+        if shopOrder.isEmpty && !updatedComparisons.isEmpty {
+            // Первая загрузка: сохраняем порядок (текущий магазин первый, остальные по выгоде)
+            let currentShop = updatedComparisons.first(where: { $0.isCurrentShop })
+            let otherShops = updatedComparisons.filter { !$0.isCurrentShop }
+                .sorted { c1, c2 in
+                    let price1 = c1.totalPrice ?? Double.infinity
+                    let price2 = c2.totalPrice ?? Double.infinity
+                    return price1 < price2
+                }
+            shopOrder = otherShops.map { $0.shopName }
+        }
         
-        priceComparisons = updatedComparisons
+        // Сортируем обновленные сравнения, сохраняя порядок
+        let sortedComparisons: [PriceComparison]
+        let currentShop = updatedComparisons.first(where: { $0.isCurrentShop })
+        let otherShops = updatedComparisons.filter { !$0.isCurrentShop }
+        
+        if !shopOrder.isEmpty {
+            // Используем сохраненный порядок для остальных магазинов
+            let sortedOtherShops = shopOrder.compactMap { shopName in
+                otherShops.first(where: { $0.shopName == shopName })
+            }
+            // Добавляем новые магазины, которых нет в сохраненном порядке (сортируем по выгоде)
+            let existingShopNames = Set(shopOrder)
+            let newShops = otherShops.filter { !existingShopNames.contains($0.shopName) }
+                .sorted { c1, c2 in
+                    let price1 = c1.totalPrice ?? Double.infinity
+                    let price2 = c2.totalPrice ?? Double.infinity
+                    return price1 < price2
+                }
+            
+            // Текущий магазин первый, затем остальные в сохраненном порядке + новые
+            if let current = currentShop {
+                sortedComparisons = [current] + sortedOtherShops + newShops
+            } else {
+                sortedComparisons = sortedOtherShops + newShops
+            }
+        } else {
+            // Если порядок не сохранен, сортируем по выгоде
+            let sortedOtherShops = otherShops.sorted { c1, c2 in
+                let price1 = c1.totalPrice ?? Double.infinity
+                let price2 = c2.totalPrice ?? Double.infinity
+                return price1 < price2
+            }
+            if let current = currentShop {
+                sortedComparisons = [current] + sortedOtherShops
+            } else {
+                sortedComparisons = sortedOtherShops
+            }
+        }
+        
+        priceComparisons = sortedComparisons
         
         // Полностью очищаем карточки
         while !priceComparisonStackView.arrangedSubviews.isEmpty {
@@ -695,8 +1185,32 @@ extension BasketView: UITableViewDataSource, UITableViewDelegate {
         let cell = tableView.dequeueReusableCell(withIdentifier: "BasketItemCell", for: indexPath) as! BasketItemCell
         let item = cartItems[indexPath.row]
         
-        // Определяем, является ли товар альтернативой (есть originalProductName и название отличается)
-        let isAlternative = item.originalProductName != nil && item.originalProductName != item.product.name
+        // Определяем, является ли товар альтернативой
+        // Кнопка альтернативы показывается только если:
+        // 1. Есть originalProductName (товар был заменен)
+        // 2. Название отличается от оригинального
+        // 3. И товар НЕ идентичен (is_identical = false)
+        let hasOriginalName = item.originalProductName != nil
+        let nameDiffers = item.originalProductName != nil && item.originalProductName != item.product.name
+        
+        // Если is_identical = true, кнопка должна быть скрыта
+        let isAlternative: Bool
+        if item.isIdentical {
+            // Товар идентичен - кнопка всегда скрыта
+            isAlternative = false
+            print("🔍 BasketView: Product '\(item.product.name)' has is_identical=true → alternative button HIDDEN")
+        } else {
+            // Товар не идентичен - проверяем другие условия
+            isAlternative = hasOriginalName && nameDiffers
+            print("🔍 BasketView: Product '\(item.product.name)' has is_identical=false → checking other conditions")
+        }
+        
+        // Логируем информацию о товаре и кнопке альтернативы
+        print("   📦 Product name: '\(item.product.name)'")
+        print("   🎯 Original name: '\(item.originalProductName ?? "nil")'")
+        print("   ✅ is_identical: \(item.isIdentical)")
+        print("   🔘 hasOriginalName: \(hasOriginalName), nameDiffers: \(nameDiffers)")
+        print("   👁️ Will show alternative button: \(isAlternative)")
         
         cell.configure(with: item, isAlternative: isAlternative)
         cell.onQuantityChanged = { [weak self] newQuantity in
@@ -824,7 +1338,7 @@ extension BasketView: UITableViewDataSource, UITableViewDelegate {
         // Заголовок
         let titleLabel = UILabel()
         titleLabel.text = "Выберите альтернативу"
-        titleLabel.font = .systemFont(ofSize: 18, weight: .bold)
+        titleLabel.font = UIFont.onestBold(size: 18)
         titleLabel.textAlignment = .center
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         containerView.addSubview(titleLabel)
@@ -917,7 +1431,7 @@ extension BasketView: UITableViewDataSource, UITableViewDelegate {
         // Название
         let nameLabel = UILabel()
         nameLabel.text = product.name
-        nameLabel.font = .systemFont(ofSize: 14, weight: .medium)
+        nameLabel.font = UIFont.onestMedium(size: 14)
         nameLabel.numberOfLines = 2
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
         cardView.addSubview(nameLabel)
@@ -925,7 +1439,7 @@ extension BasketView: UITableViewDataSource, UITableViewDelegate {
         // Цена
         let priceLabel = UILabel()
         priceLabel.text = String(format: "%.0f ₽", product.price)
-        priceLabel.font = .systemFont(ofSize: 16, weight: .bold)
+        priceLabel.font = UIFont.onestBold(size: 16)
         priceLabel.textColor = .systemGreen
         priceLabel.translatesAutoresizingMaskIntoConstraints = false
         cardView.addSubview(priceLabel)
@@ -933,10 +1447,10 @@ extension BasketView: UITableViewDataSource, UITableViewDelegate {
         // Кнопка выбора
         let selectButton = UIButton(type: .system)
         selectButton.setTitle("Выбрать", for: .normal)
-        selectButton.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
-        selectButton.backgroundColor = UIColor.primaryColor
+        selectButton.titleLabel?.font = UIFont.onestSemibold(size: 14)
         selectButton.setTitleColor(.white, for: .normal)
         selectButton.layer.cornerRadius = 8
+        selectButton.clipsToBounds = true
         selectButton.translatesAutoresizingMaskIntoConstraints = false
         cardView.addSubview(selectButton)
         
@@ -968,6 +1482,11 @@ extension BasketView: UITableViewDataSource, UITableViewDelegate {
             selectButton.heightAnchor.constraint(equalToConstant: 36)
         ])
         
+        // Применяем градиент после установки constraints
+        DispatchQueue.main.async { [weak self] in
+            self?.applyGradientToButton(selectButton, cornerRadius: 8)
+        }
+        
         return cardView
     }
     
@@ -994,15 +1513,18 @@ extension BasketView: UITableViewDataSource, UITableViewDelegate {
         if var cart = cachedCarts.first(where: { $0.shopName == shopName }),
            let index = cart.items.firstIndex(where: { $0.product.name == item.product.name }) {
             
-            // Сохраняем количество и оригинальное название
+            // Сохраняем количество, оригинальное название и флаг isIdentical
             let quantity = cart.items[index].quantity
             let originalName = cart.items[index].originalProductName ?? item.product.name
+            let isIdentical = cart.items[index].isIdentical
             
             // Создаем новый CartItem с заменой
+            // При замене через альтернативу новый товар не может быть идентичным
             let newItem = CartItem(
                 product: newProduct,
                 quantity: quantity,
-                originalProductName: originalName
+                originalProductName: originalName,
+                isIdentical: false // Замененный товар всегда не идентичен
             )
             
             cart.items[index] = newItem
@@ -1077,7 +1599,7 @@ extension BasketView: UITableViewDataSource, UITableViewDelegate {
     }
     
     func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
-        return 80
+        return 120 // Уменьшена высота для меньшего расстояния между ячейками
     }
 }
 
@@ -1122,95 +1644,136 @@ final class BasketItemCell: UITableViewCell {
     
     private func setup() {
         selectionStyle = .none
-        backgroundColor = .white
+        backgroundColor = .clear
         
-        // Product image
-        productImageView.backgroundColor = UIColor.lightGray.withAlphaComponent(0.3)
-        productImageView.layer.cornerRadius = 8
+        // Контейнер-квадрат 110x110 для картинки товара
+        let imageContainer = UIView()
+        imageContainer.backgroundColor = .white
+        imageContainer.layer.cornerRadius = 8
+        imageContainer.clipsToBounds = true
+        imageContainer.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(imageContainer)
+        
+        // Product image - внутри квадрата 110x110
+        productImageView.backgroundColor = .clear
         productImageView.contentMode = .scaleAspectFit
+        productImageView.clipsToBounds = true
         productImageView.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(productImageView)
+        imageContainer.addSubview(productImageView)
         
-        // Alternative button (A)
-        alternativeButton.setTitle("А", for: .normal)
-        alternativeButton.setTitleColor(.white, for: .normal)
-        alternativeButton.backgroundColor = UIColor.primaryColor
-        alternativeButton.layer.cornerRadius = 10
-        alternativeButton.titleLabel?.font = UIFont.systemFont(ofSize: 14, weight: .bold)
+        // Alternative button - овал с текстом "+ Альтернатива"
+        alternativeButton.setTitle("+ Альтернатива", for: .normal)
+        alternativeButton.setTitleColor(UIColor(hex: "FF6C02") ?? .systemOrange, for: .normal)
+        alternativeButton.backgroundColor = UIColor(hex: "FBFBFB") ?? .systemGray6
+        alternativeButton.titleLabel?.font = UIFont.onestMedium(size: 12)
+        alternativeButton.contentEdgeInsets = UIEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
+        alternativeButton.layer.cornerRadius = 12 // Для овальной формы (высота 24, радиус 12)
+        alternativeButton.clipsToBounds = true
         alternativeButton.translatesAutoresizingMaskIntoConstraints = false
         alternativeButton.addTarget(self, action: #selector(alternativeButtonTapped), for: .touchUpInside)
         alternativeButton.isHidden = true // По умолчанию скрыта
         contentView.addSubview(alternativeButton)
         
-        // Title label
-        titleLabel.font = UIFont.systemFont(ofSize: 16, weight: .medium)
-        titleLabel.textColor = .black
-        titleLabel.numberOfLines = 2
+        // Title label - справа от картинки
+        titleLabel.font = UIFont.onestMedium(size: 12)
+        titleLabel.textColor = UIColor(hex: "4E4E4E") ?? .darkGray
+        titleLabel.numberOfLines = 2 // Максимум 2 строки
+        titleLabel.lineBreakMode = .byTruncatingTail // Обрезаем текст после максимально возможного текста в 2 строки
+        titleLabel.adjustsFontSizeToFitWidth = false // Не уменьшаем шрифт
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(titleLabel)
         
-        // Price label
-        priceLabel.font = UIFont.systemFont(ofSize: 16, weight: .semibold)
-        priceLabel.textColor = UIColor.primaryColor
+        // Прямоугольник с кнопками + и - (цвет EDEDED) - под названием
+        let quantityOval = UIView()
+        quantityOval.backgroundColor = UIColor(hex: "EDEDED") ?? .systemGray5
+        quantityOval.layer.cornerRadius = 13.5 // Для прямоугольника 80x27 (27/2 = 13.5)
+        quantityOval.clipsToBounds = true
+        quantityOval.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(quantityOval)
+        
+        // Кнопка минус
+        minusButton.setTitle("−", for: .normal)
+        minusButton.setTitleColor(UIColor(hex: "747474") ?? .gray, for: .normal)
+        minusButton.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .regular)
+        minusButton.addTarget(self, action: #selector(minusButtonTapped), for: .touchUpInside)
+        minusButton.translatesAutoresizingMaskIntoConstraints = false
+        quantityOval.addSubview(minusButton)
+        
+        // Label количества
+        quantityLabel.text = "1"
+        quantityLabel.textAlignment = .center
+        quantityLabel.font = UIFont.onestMedium(size: 16)
+        quantityLabel.textColor = UIColor(hex: "747474") ?? .gray
+        quantityLabel.translatesAutoresizingMaskIntoConstraints = false
+        quantityOval.addSubview(quantityLabel)
+        
+        // Кнопка плюс
+        plusButton.setTitle("+", for: .normal)
+        plusButton.setTitleColor(UIColor(hex: "747474") ?? .gray, for: .normal)
+        plusButton.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .regular)
+        plusButton.addTarget(self, action: #selector(plusButtonTapped), for: .touchUpInside)
+        plusButton.translatesAutoresizingMaskIntoConstraints = false
+        quantityOval.addSubview(plusButton)
+        
+        // Price label - в правой части карточки
+        priceLabel.font = UIFont.onestMedium(size: 18)
+        priceLabel.textColor = UIColor(hex: "4E4E4E") ?? .darkGray
         priceLabel.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(priceLabel)
         
-        // Quantity controls
-        quantityStackView.axis = .horizontal
-        quantityStackView.spacing = 8
-        quantityStackView.alignment = .center
-        quantityStackView.distribution = .fillEqually
-        quantityStackView.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(quantityStackView)
-        
-        minusButton.setTitle("-", for: .normal)
-        minusButton.setTitleColor(.white, for: .normal)
-        minusButton.backgroundColor = UIColor.primaryColor
-        minusButton.layer.cornerRadius = 15
-        minusButton.titleLabel?.font = UIFont.systemFont(ofSize: 18, weight: .bold)
-        minusButton.addTarget(self, action: #selector(minusButtonTapped), for: .touchUpInside)
-        
-        quantityLabel.text = "1"
-        quantityLabel.textAlignment = .center
-        quantityLabel.font = UIFont.systemFont(ofSize: 16, weight: .semibold)
-        quantityLabel.textColor = .black
-        
-        plusButton.setTitle("+", for: .normal)
-        plusButton.setTitleColor(.white, for: .normal)
-        plusButton.backgroundColor = UIColor.primaryColor
-        plusButton.layer.cornerRadius = 15
-        plusButton.titleLabel?.font = UIFont.systemFont(ofSize: 18, weight: .bold)
-        plusButton.addTarget(self, action: #selector(plusButtonTapped), for: .touchUpInside)
-        
-        quantityStackView.addArrangedSubview(minusButton)
-        quantityStackView.addArrangedSubview(quantityLabel)
-        quantityStackView.addArrangedSubview(plusButton)
-        
         NSLayoutConstraint.activate([
-            productImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
-            productImageView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            productImageView.widthAnchor.constraint(equalToConstant: 50),
-            productImageView.heightAnchor.constraint(equalToConstant: 50),
+            // Контейнер-квадрат 80x80 для картинки, слева с отрицательным отступом для сдвига левее
+            imageContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            imageContainer.topAnchor.constraint(equalTo: contentView.topAnchor),
+            imageContainer.widthAnchor.constraint(equalToConstant: 80),
+            imageContainer.heightAnchor.constraint(equalToConstant: 80),
             
-            alternativeButton.leadingAnchor.constraint(equalTo: productImageView.trailingAnchor, constant: -8),
-            alternativeButton.topAnchor.constraint(equalTo: productImageView.topAnchor, constant: -4),
-            alternativeButton.widthAnchor.constraint(equalToConstant: 20),
-            alternativeButton.heightAnchor.constraint(equalToConstant: 20),
+            // Product image - заполняет весь контейнер
+            productImageView.leadingAnchor.constraint(equalTo: imageContainer.leadingAnchor),
+            productImageView.trailingAnchor.constraint(equalTo: imageContainer.trailingAnchor),
+            productImageView.topAnchor.constraint(equalTo: imageContainer.topAnchor),
+            productImageView.bottomAnchor.constraint(equalTo: imageContainer.bottomAnchor),
             
-            titleLabel.leadingAnchor.constraint(equalTo: productImageView.trailingAnchor, constant: 12),
-            titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: quantityStackView.leadingAnchor, constant: -8),
+            // Alternative button - овал внизу картинки
+            alternativeButton.centerXAnchor.constraint(equalTo: imageContainer.centerXAnchor),
+            alternativeButton.bottomAnchor.constraint(equalTo: imageContainer.bottomAnchor, constant: -4),
+            alternativeButton.heightAnchor.constraint(equalToConstant: 24),
             
-            priceLabel.leadingAnchor.constraint(equalTo: productImageView.trailingAnchor, constant: 12),
-            priceLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
-            priceLabel.trailingAnchor.constraint(lessThanOrEqualTo: quantityStackView.leadingAnchor, constant: -8),
+            // Title label - справа от контейнера картинки, ширина 147 пикселей, до 2 строк
+            titleLabel.leadingAnchor.constraint(equalTo: imageContainer.trailingAnchor, constant: 26),
+            titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 4),
+            titleLabel.widthAnchor.constraint(equalToConstant: 147),
             
-            quantityStackView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            quantityStackView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            quantityStackView.widthAnchor.constraint(equalToConstant: 100),
-            quantityStackView.heightAnchor.constraint(equalToConstant: 30),
+            // Прямоугольник с кнопками - под названием, левый край совпадает с левым краем названия
+            quantityOval.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            quantityOval.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
+            quantityOval.widthAnchor.constraint(equalToConstant: 80),
+            quantityOval.heightAnchor.constraint(equalToConstant: 27),
             
-            contentView.bottomAnchor.constraint(greaterThanOrEqualTo: priceLabel.bottomAnchor, constant: 12)
+            // Кнопка минус слева в овале
+            minusButton.leadingAnchor.constraint(equalTo: quantityOval.leadingAnchor, constant: 8),
+            minusButton.centerYAnchor.constraint(equalTo: quantityOval.centerYAnchor),
+            minusButton.widthAnchor.constraint(equalToConstant: 20),
+            minusButton.heightAnchor.constraint(equalToConstant: 20),
+            
+            // Количество по центру овала
+            quantityLabel.centerXAnchor.constraint(equalTo: quantityOval.centerXAnchor),
+            quantityLabel.centerYAnchor.constraint(equalTo: quantityOval.centerYAnchor),
+            
+            // Кнопка плюс справа в овале
+            plusButton.trailingAnchor.constraint(equalTo: quantityOval.trailingAnchor, constant: -8),
+            plusButton.centerYAnchor.constraint(equalTo: quantityOval.centerYAnchor),
+            plusButton.widthAnchor.constraint(equalToConstant: 20),
+            plusButton.heightAnchor.constraint(equalToConstant: 20),
+            
+            // Price label - ближе к правому краю, на уровне с прямоугольником (сдвинута левее)
+            priceLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            priceLabel.centerYAnchor.constraint(equalTo: quantityOval.centerYAnchor),
+            priceLabel.leadingAnchor.constraint(greaterThanOrEqualTo: quantityOval.trailingAnchor, constant: 8),
+            
+            // Высота contentView (с минимальным отступом снизу)
+            contentView.bottomAnchor.constraint(greaterThanOrEqualTo: imageContainer.bottomAnchor, constant: 0),
+            contentView.bottomAnchor.constraint(greaterThanOrEqualTo: quantityOval.bottomAnchor, constant: 0)
         ])
     }
     
@@ -1229,9 +1792,6 @@ final class BasketItemCell: UITableViewCell {
     }
     
     func configure(with item: CartItem, isAlternative: Bool = false) {
-        print("🔧 Configuring cell for: \(item.product.name)")
-        print("   Image URL: \(item.product.imageURL?.prefix(70) ?? "nil")")
-        print("   Is alternative: \(isAlternative)")
         
         isAlternativeProduct = isAlternative
         
@@ -1239,7 +1799,7 @@ final class BasketItemCell: UITableViewCell {
         let productName = item.product.name
         
         titleLabel.text = productName
-        priceLabel.text = String(format: "%.2f ₽", item.product.price)
+        priceLabel.text = String(format: "%.2f₽", item.product.price)
         quantityLabel.text = "\(item.quantity)"
         
         // Показываем/скрываем кнопку альтернатив
@@ -1263,7 +1823,6 @@ final class BasketItemCell: UITableViewCell {
             currentImageURL = nil
             currentProductName = nil
             productImageView.image = UIImage(named: "Image")
-            print("   No image URL provided")
         }
     }
     
@@ -1290,45 +1849,26 @@ final class BasketItemCell: UITableViewCell {
     private func loadImage(from urlString: String, for productName: String) {
         // Проверяем, что URL и название товара все еще актуальны (на случай быстрого переиспользования)
         guard currentImageURL == urlString && currentProductName == productName else {
-            print("⚠️ URL or product changed before load started")
-            print("   Expected URL: '\(currentImageURL ?? "nil")', got: '\(urlString)'")
-            print("   Expected product: '\(currentProductName ?? "nil")', got: '\(productName)'")
             return
         }
         
         guard let url = URL(string: urlString) else {
-            print("❌ Invalid image URL: \(urlString)")
             productImageView.image = UIImage(named: "Image")
             return
         }
         
         let cacheKey = urlString as NSString
         
-        print("🔑 Cache key: \(cacheKey)")
-        
         // Проверяем кэш
         if let cachedImage = BasketItemCell.imageCache.object(forKey: cacheKey) {
             // Проверяем, что URL и название товара все еще актуальны перед установкой изображения из кэша
-            guard currentImageURL == urlString && currentProductName == productName else {
-                print("⚠️ URL or product changed while checking cache, skipping cached image")
+            guard currentImageURL == urlString && currentProductName == productName && titleLabel.text == productName else {
                 return
             }
             
-            // Дополнительная проверка: название товара в label должно совпадать
-            guard titleLabel.text == productName else {
-                print("⚠️ Product name mismatch in label, skipping cached image")
-                print("   Label text: '\(titleLabel.text ?? "nil")', expected: '\(productName)'")
-                return
-            }
-            
-            print("✅ Using cached image for: \(urlString)")
-            print("   Cache hit for product: \(productName)")
             productImageView.image = cachedImage
             return
         }
-        
-        print("🖼️ Loading basket image from: \(urlString)")
-        print("   No cache, downloading for product: \(productName)")
         
         // Создаем и сохраняем задачу загрузки
         imageLoadTask = URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
@@ -1336,25 +1876,13 @@ final class BasketItemCell: UITableViewCell {
                 guard let self = self else { return }
                 
                 // Проверяем, что URL и название товара все еще актуальны для этой ячейки
-                guard self.currentImageURL == urlString && self.currentProductName == productName else {
-                    print("⚠️ Image URL or product changed during load, skipping: \(urlString)")
-                    print("   Current URL is now: \(self.currentImageURL ?? "nil")")
-                    print("   Current product is now: \(self.currentProductName ?? "nil")")
-                    return
-                }
-                
-                // Проверяем, что название товара в label все еще совпадает
-                guard self.titleLabel.text == productName else {
-                    print("⚠️ Product name changed in label during load, skipping")
-                    print("   Label text: '\(self.titleLabel.text ?? "nil")', expected: '\(productName)'")
+                guard self.currentImageURL == urlString && self.currentProductName == productName && self.titleLabel.text == productName else {
                     return
                 }
                 
                 if let error = error {
                     // Игнорируем ошибки отмены
                     if (error as NSError).code != NSURLErrorCancelled {
-                        print("❌ Error loading basket image: \(error)")
-                        // Проверяем URL и название еще раз перед установкой placeholder
                         if self.currentImageURL == urlString && self.currentProductName == productName && self.titleLabel.text == productName {
                             self.productImageView.image = UIImage(named: "Image")
                         }
@@ -1363,8 +1891,6 @@ final class BasketItemCell: UITableViewCell {
                 }
                 
                 guard let data = data, let image = UIImage(data: data) else {
-                    print("❌ Invalid basket image data")
-                    // Проверяем URL и название еще раз перед установкой placeholder
                     if self.currentImageURL == urlString && self.currentProductName == productName && self.titleLabel.text == productName {
                         self.productImageView.image = UIImage(named: "Image")
                     }
@@ -1372,24 +1898,9 @@ final class BasketItemCell: UITableViewCell {
                 }
                 
                 // Финальная проверка URL и названия товара перед установкой изображения
-                guard self.currentImageURL == urlString && self.currentProductName == productName else {
-                    print("⚠️ Image URL or product changed after load completed, skipping: \(urlString)")
-                    print("   Current URL is now: \(self.currentImageURL ?? "nil")")
-                    print("   Current product is now: \(self.currentProductName ?? "nil")")
+                guard self.currentImageURL == urlString && self.currentProductName == productName && self.titleLabel.text == productName else {
                     return
                 }
-                
-                // Проверяем, что название товара в label все еще совпадает
-                guard self.titleLabel.text == productName else {
-                    print("⚠️ Product name changed in label after load, skipping")
-                    print("   Label text: '\(self.titleLabel.text ?? "nil")', expected: '\(productName)'")
-                    return
-                }
-                
-                print("✅ Basket image loaded successfully for: \(urlString)")
-                print("   Image size: \(image.size.width) x \(image.size.height)")
-                print("   Saving to cache with key: \(String(describing: cacheKey))")
-                print("   For product: \(productName)")
                 
                 // Сохраняем в кэш
                 BasketItemCell.imageCache.setObject(image, forKey: cacheKey)

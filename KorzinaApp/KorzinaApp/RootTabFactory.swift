@@ -43,8 +43,8 @@ enum RootTabFactory {
             appearance.configureWithOpaqueBackground()
             appearance.backgroundColor = UIColor.barColor
 
-            let normalFont = UIFont(name: "Inter-Regular", size: 14) ?? UIFont.systemFont(ofSize: 14)
-            let selectedFont = UIFont(name: "Inter-Regular", size: 14) ?? UIFont.systemFont(ofSize: 14, weight: .medium)
+            let normalFont = UIFont.onestRegular(size: 14)
+            let selectedFont = UIFont.onestMedium(size: 14)
             appearance.stackedLayoutAppearance.normal.titleTextAttributes = [
                 .font: normalFont,
                 .foregroundColor: UIColor.unselect ?? .black

@@ -53,19 +53,30 @@ final class ProfileInteractor: ProfileInteractorProtocol {
     }
     
     func addOrder(_ order: OrderHistoryItemEntity) {
-        var orders = loadOrders()
-        orders.insert(order, at: 0) // Добавляем новый заказ в начало списка
-        saveOrders(orders)
+        // Заказы теперь сохраняются через OrderHistoryManager при получении уведомления
+        // Этот метод вызывается только для обновления UI, если экран профиля открыт
+        print("💾 ProfileInteractor: Order added (already saved by OrderHistoryManager) - ID: \(order.id), shop: \(order.storeName), total: \(order.total) ₽")
         presenter?.didUpdateProfile(loadProfile())
     }
     
     private func loadOrders() -> [OrderHistoryItemEntity] {
-        // Если заказов нет в UserDefaults, используем sampleOrders
-        guard let data = defaults.data(forKey: Keys.orders),
-              let decoded = try? JSONDecoder().decode([OrderHistoryItemEntity].self, from: data) else {
-            return sampleOrders()
+        // Загружаем заказы через OrderHistoryManager
+        let orders = OrderHistoryManager.shared.loadOrders()
+        
+        // Если заказов нет в UserDefaults, используем sampleOrders только при первом запуске
+        // Проверяем, были ли уже сохранены заказы ранее
+        if orders.isEmpty && !defaults.bool(forKey: "profile.orders.initialized") {
+            // Первый запуск - используем sampleOrders и помечаем, что инициализация выполнена
+            let samples = sampleOrders()
+            defaults.set(true, forKey: "profile.orders.initialized")
+            // Сохраняем sampleOrders через OrderHistoryManager
+            if let encoded = try? JSONEncoder().encode(samples) {
+                defaults.set(encoded, forKey: Keys.orders)
+            }
+            return samples
         }
-        return decoded
+        
+        return orders
     }
     
     private func saveOrders(_ orders: [OrderHistoryItemEntity]) {

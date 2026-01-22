@@ -68,10 +68,7 @@ class BasketInteractor: BasketInteractorProtocol {
                 
                 guard let data = data else { return }
                 
-                // Debug: print raw response
-                if let responseStr = String(data: data, encoding: .utf8) {
-                    print("📦 Raw response: \(responseStr.prefix(500))...")
-                }
+                // Убрано избыточное логирование ответа
                 
                 do {
                     if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -81,15 +78,36 @@ class BasketInteractor: BasketInteractorProtocol {
                         let currentCartItems = CartManager.shared.getAllCartItems()
                         
                         for (shopName, matches) in shops {
+                            print("🏪 Shop: \(shopName), matches: \(matches.count)")
+                            
                             // Считаем общую цену для этого магазина
                             var totalPrice: Double = 0
                             var productsFound = 0
                             var cartItems: [CartItem] = []
                             
-                            for match in matches {
+                            for (index, match) in matches.enumerated() {
+                                print("  [\(index)] Processing match for shop \(shopName)")
                                 guard let matchedOffer = match["matched_offer"] as? [String: Any],
                                       matchedOffer["offer_id"] != nil else {
                                     continue
+                                }
+                                
+                                // Логируем все поля match
+                                print("    📋 Match fields:")
+                                for (key, value) in match {
+                                    if key != "matched_offer" {
+                                        print("      \(key): \(value)")
+                                    }
+                                }
+                                
+                                // Логируем все поля matched_offer
+                                print("    📦 Matched offer fields:")
+                                for (key, value) in matchedOffer {
+                                    if key != "images" {
+                                        print("      \(key): \(value)")
+                                    } else {
+                                        print("      \(key): [\(value)] (images array)")
+                                    }
                                 }
                                 
                                 let productName = matchedOffer["title"] as? String ?? ""
@@ -133,8 +151,51 @@ class BasketInteractor: BasketInteractorProtocol {
                                     offerId: matchedOffer["offer_id"] as? Int
                                 )
                                 
-                                // Сохраняем связь с оригинальным товаром (targetTitle)
-                                cartItems.append(CartItem(product: product, quantity: quantity, originalProductName: targetTitle))
+                                // Получаем is_identical из ответа API /api/all_alternatives
+                                // Сначала проверяем прямое поле is_identical в match
+                                var isIdentical = false
+                                
+                                let matchType = match["match_type"] as? String ?? ""
+                                let similarity = match["similarity"] as? Double ?? 0.0
+                                let matchedOfferId = matchedOffer["offer_id"] as? Int
+                                let targetOfferId = match["target_offer_id"] as? Int
+                                
+                                if let isIdenticalValue = match["is_identical"] as? Bool {
+                                    isIdentical = isIdenticalValue
+                                    print("   ✅ is_identical from API: \(isIdentical)")
+                                } else if let isIdenticalValue = match["isIdentical"] as? Bool {
+                                    isIdentical = isIdenticalValue
+                                    print("   ✅ isIdentical from API: \(isIdentical)")
+                                } else {
+                                    // Fallback: определяем на основе match_type и similarity
+                                    if let matchedId = matchedOfferId, let targetId = targetOfferId, matchedId == targetId {
+                                        // Если offer_id совпадает, это точно тот же товар
+                                        isIdentical = true
+                                    } else if matchType.contains("full") && similarity >= 1.0 {
+                                        // Если match_type содержит "full" и similarity = 1, товар идентичен
+                                        isIdentical = true
+                                    }
+                                    print("   ⚠️ is_identical not in API response, calculated: \(isIdentical)")
+                                }
+                                
+                                // Логируем информацию о товаре и флаге is_identical для корзины другого магазина
+                                print("🛒 BasketInteractor: Adding offer to alternative shop cart (\(shopName)):")
+                                print("   📦 Product name: \(productName)")
+                                print("   🎯 Original product (target): \(targetTitle)")
+                                print("   💰 Price: \(price) ₽")
+                                print("   🆔 offer_id: \(matchedOfferId ?? -1)")
+                                print("   🆔 target_offer_id: \(targetOfferId ?? -1)")
+                                print("   🔍 match_type: '\(matchType)'")
+                                print("   📊 similarity: \(similarity)")
+                                print("   ✅ is_identical: \(isIdentical)")
+                                
+                                // Сохраняем связь с оригинальным товаром (targetTitle) и флаг is_identical
+                                cartItems.append(CartItem(
+                                    product: product,
+                                    quantity: quantity,
+                                    originalProductName: targetTitle,
+                                    isIdentical: isIdentical
+                                ))
                             }
                             
                             let isCurrentShop = shopName == currentShopName
@@ -168,8 +229,20 @@ class BasketInteractor: BasketInteractorProtocol {
                             }
                         }
                         
-                        // Сортируем по цене (сначала дешевые)
-                        priceComparisons.sort { ($0.totalPrice ?? Double.infinity) < ($1.totalPrice ?? Double.infinity) }
+                        // Сортируем: текущий магазин первый, остальные по выгоде (от меньшей цены к большей)
+                        priceComparisons.sort { c1, c2 in
+                            // Текущий магазин всегда первый
+                            if c1.isCurrentShop && !c2.isCurrentShop {
+                                return true
+                            }
+                            if !c1.isCurrentShop && c2.isCurrentShop {
+                                return false
+                            }
+                            // Если оба текущие или оба не текущие, сортируем по цене
+                            let price1 = c1.totalPrice ?? Double.infinity
+                            let price2 = c2.totalPrice ?? Double.infinity
+                            return price1 < price2
+                        }
                         
                         print("📊 Sorted price comparisons:")
                         for comp in priceComparisons {

@@ -16,8 +16,20 @@ class StartRouter: StartRouterProtocol {
     
     func navigateToTabBar() {
         guard let viewController = viewController else { return }
+        
+        // Временно убрали tab bar - показываем только MainView
+        let mainView = MainBuilder.build()
+        let navController = UINavigationController(rootViewController: mainView)
+        navController.modalPresentationStyle = .fullScreen
+        navController.modalTransitionStyle = .crossDissolve
+        viewController.present(navController, animated: true, completion: nil)
+        
+        /*
+        // Оригинальный код с tab bar (закомментирован)
         let tabBar = RootTabFactory.makeRootTabController()
         tabBar.modalPresentationStyle = .fullScreen
-        viewController.present(tabBar, animated: true)
+        tabBar.modalTransitionStyle = .crossDissolve // Плавный переход
+        viewController.present(tabBar, animated: true, completion: nil)
+        */
     }
 }

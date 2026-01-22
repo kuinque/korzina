@@ -23,6 +23,9 @@
 	</dict>
     <key>UIAppFonts</key>
     <array>
+        <string>Onest-Regular.ttf</string>
+        <string>Onest-Medium.ttf</string>
+        <string>Onest-SemiBold.ttf</string>
         <string>Montserrat-Regular.ttf</string>
         <string>Inter-Regular.otf</string>
     </array>

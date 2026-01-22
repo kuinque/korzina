@@ -62,27 +62,8 @@ final class ProfilePresenter: ProfilePresenterProtocol {
         self.interactor = interactor
         self.router = router
         
-        // Подписываемся на уведомления о новых заказах
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleNewOrder(_:)),
-            name: NSNotification.Name("NewOrderCreated"),
-            object: nil
-        )
-    }
-    
-    deinit {
-        NotificationCenter.default.removeObserver(self)
-    }
-    
-    @objc private func handleNewOrder(_ notification: Notification) {
-        guard let userInfo = notification.userInfo,
-              let storeName = userInfo["storeName"] as? String,
-              let total = userInfo["total"] as? Double else {
-            return
-        }
-        
-        addOrder(storeName: storeName, total: total)
+        // Заказы теперь обрабатываются через OrderHistoryManager, который подписан на уведомления при запуске приложения
+        // Подписка здесь больше не нужна
     }
     
     func viewDidLoad() {
@@ -98,6 +79,7 @@ final class ProfilePresenter: ProfilePresenterProtocol {
     func addOrder(storeName: String, total: Double) {
         // Генерируем ID заказа
         let orderId = generateOrderId(storeName: storeName)
+        print("📝 ProfilePresenter: Generated order ID: \(orderId)")
         
         // Создаем новый заказ со статусом "в пути"
         let newOrder = OrderHistoryItemEntity(
@@ -110,6 +92,7 @@ final class ProfilePresenter: ProfilePresenterProtocol {
         
         // Добавляем заказ через interactor
         interactor?.addOrder(newOrder)
+        print("✅ ProfilePresenter: Order added to interactor")
     }
     
     private func generateOrderId(storeName: String) -> String {

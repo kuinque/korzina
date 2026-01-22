@@ -32,6 +32,7 @@ final class ProfileView: UIViewController {
     private let nameLabel = UILabel()
     private let phoneLabel = UILabel()
     private let changeAvatarButton = UIButton(type: .system)
+    private let backButton = UIButton(type: .system) // Кастомная кнопка назад
     
     private var logo = UIImageView()
     private var logoName = UIImageView()
@@ -50,16 +51,68 @@ final class ProfileView: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
+        
+        // Скрываем стандартный navigation bar
+        navigationController?.setNavigationBarHidden(true, animated: false)
+        navigationItem.hidesBackButton = true
+        
         setUpView()
         presenter?.viewDidLoad()
     }
     
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        // Убеждаемся, что navigation bar скрыт
+        navigationController?.setNavigationBarHidden(true, animated: animated)
+        
+        // Обновляем профиль при появлении экрана, чтобы показать новые заказы
+        presenter?.viewDidLoad()
+    }
+    
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // Убеждаемся, что кнопка назад всегда поверх других элементов
+        view.bringSubviewToFront(backButton)
+    }
+    
     private func setUpView() {
+        setUpCustomBackButton()
         setUpHead()
         setUpLogo()
         setUpProfileContainer()
         setUpTableView()
         applyPlaceholderHeader()
+    }
+    
+    private func setUpCustomBackButton() {
+        // Используем backbutton1 из assets
+        if let backImage = UIImage(named: "backbutton1") {
+            backButton.setImage(backImage, for: .normal)
+        } else {
+            // Fallback на системную иконку, если изображение не найдено
+            backButton.setImage(UIImage(systemName: "chevron.left"), for: .normal)
+        }
+        backButton.tintColor = .black
+        backButton.contentEdgeInsets = .zero
+        backButton.imageEdgeInsets = .zero
+        backButton.contentHorizontalAlignment = .left
+        backButton.contentVerticalAlignment = .center
+        backButton.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(backButton)
+        
+        NSLayoutConstraint.activate([
+            // Такое же расположение как в BasketView (2 пикселя от safeArea сверху, 12 от левого края)
+            backButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 2),
+            backButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            backButton.widthAnchor.constraint(equalToConstant: 50),
+            backButton.heightAnchor.constraint(equalToConstant: 44)
+        ])
+        
+        backButton.addTarget(self, action: #selector(backButtonTapped), for: .touchUpInside)
+    }
+    
+    @objc private func backButtonTapped() {
+        navigationController?.popViewController(animated: true)
     }
     
     private func setUpHead() {
@@ -109,17 +162,17 @@ final class ProfileView: UIViewController {
         
         changeAvatarButton.translatesAutoresizingMaskIntoConstraints = false
         changeAvatarButton.setTitle("Изменить фото", for: .normal)
-        changeAvatarButton.titleLabel?.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        changeAvatarButton.titleLabel?.font = UIFont.onestMedium(size: 14)
         changeAvatarButton.tintColor = .primaryColor
         changeAvatarButton.addTarget(self, action: #selector(changeAvatarTapped), for: .touchUpInside)
         
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
-        nameLabel.font = UIFont.systemFont(ofSize: 22, weight: .semibold)
+        nameLabel.font = UIFont.onestSemibold(size: 22)
         nameLabel.textColor = .label
         nameLabel.textAlignment = .center
         
         phoneLabel.translatesAutoresizingMaskIntoConstraints = false
-        phoneLabel.font = UIFont.systemFont(ofSize: 16, weight: .regular)
+        phoneLabel.font = UIFont.onestRegular(size: 16)
         phoneLabel.textColor = .secondaryLabel
         phoneLabel.textAlignment = .center
         
@@ -230,7 +283,7 @@ extension ProfileView: UITableViewDataSource, UITableViewDelegate {
             cell.textLabel?.text = "Заказов пока нет"
             cell.textLabel?.textAlignment = .center
             cell.textLabel?.textColor = .secondaryLabel
-            cell.textLabel?.font = UIFont.systemFont(ofSize: 16, weight: .regular)
+            cell.textLabel?.font = UIFont.onestRegular(size: 16)
             cell.selectionStyle = .none
             cell.backgroundColor = .clear
             return cell
@@ -297,23 +350,23 @@ final class ProfileOrderCell: UITableViewCell {
         container.pinRight(to: contentView, 16)
         
         orderIdLabel.translatesAutoresizingMaskIntoConstraints = false
-        orderIdLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        orderIdLabel.font = UIFont.onestMedium(size: 14)
         orderIdLabel.textColor = .secondaryLabel
         
         storeLabel.translatesAutoresizingMaskIntoConstraints = false
-        storeLabel.font = UIFont.systemFont(ofSize: 18, weight: .semibold)
+        storeLabel.font = UIFont.onestSemibold(size: 18)
         storeLabel.textColor = .label
         
         dateLabel.translatesAutoresizingMaskIntoConstraints = false
-        dateLabel.font = UIFont.systemFont(ofSize: 14, weight: .regular)
+        dateLabel.font = UIFont.onestRegular(size: 14)
         dateLabel.textColor = .secondaryLabel
         
         totalLabel.translatesAutoresizingMaskIntoConstraints = false
-        totalLabel.font = UIFont.systemFont(ofSize: 16, weight: .semibold)
+        totalLabel.font = UIFont.onestSemibold(size: 16)
         totalLabel.textColor = .primaryColor
         
         statusBadge.translatesAutoresizingMaskIntoConstraints = false
-        statusBadge.font = UIFont.systemFont(ofSize: 12, weight: .bold)
+        statusBadge.font = UIFont.onestBold(size: 12)
         statusBadge.textColor = .white
         statusBadge.textAlignment = .center
         statusBadge.layer.cornerRadius = 10

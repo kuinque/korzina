@@ -45,7 +45,7 @@ class AddressPickerViewController: UIViewController {
         
         // Address label
         addressLabel.text = "Нажмите на карту для выбора адреса"
-        addressLabel.font = .systemFont(ofSize: 16, weight: .medium)
+        addressLabel.font = UIFont.onestMedium(size: 16)
         addressLabel.textColor = .label
         addressLabel.numberOfLines = 0
         addressLabel.textAlignment = .center
@@ -57,10 +57,11 @@ class AddressPickerViewController: UIViewController {
         
         // Confirm button
         confirmButton.setTitle("Подтвердить адрес", for: .normal)
-        confirmButton.backgroundColor = UIColor.primaryColor
+        confirmButton.backgroundColor = .clear
         confirmButton.setTitleColor(.white, for: .normal)
-        confirmButton.titleLabel?.font = .systemFont(ofSize: 18, weight: .semibold)
+        confirmButton.titleLabel?.font = UIFont.onestSemibold(size: 18)
         confirmButton.layer.cornerRadius = 12
+        confirmButton.layer.masksToBounds = true
         confirmButton.addTarget(self, action: #selector(confirmTapped), for: .touchUpInside)
         confirmButton.translatesAutoresizingMaskIntoConstraints = false
         confirmButton.isEnabled = false
@@ -91,6 +92,40 @@ class AddressPickerViewController: UIViewController {
         // Добавляем жест для выбора точки на карте
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(mapTapped(_:)))
         mapView.addGestureRecognizer(tapGesture)
+        
+        // Применяем градиент к кнопке после layout
+        DispatchQueue.main.async {
+            self.applyGradientToConfirmButton()
+        }
+    }
+    
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        applyGradientToConfirmButton()
+    }
+    
+    /// Применяет градиент к кнопке подтверждения адреса (такой же как у кнопки корзины)
+    private func applyGradientToConfirmButton() {
+        // Удаляем старый градиент, если есть
+        confirmButton.layer.sublayers?.forEach { layer in
+            if layer is CAGradientLayer {
+                layer.removeFromSuperlayer()
+            }
+        }
+        
+        // Создаем градиентный слой (такой же как у кнопки корзины)
+        let gradientLayer = CAGradientLayer()
+        gradientLayer.colors = [
+            UIColor(hex: "FF8733")?.cgColor ?? UIColor.orange.cgColor,
+            UIColor(hex: "FE6900")?.cgColor ?? UIColor.orange.cgColor
+        ]
+        gradientLayer.startPoint = CGPoint(x: 0, y: 0.5) // Слева
+        gradientLayer.endPoint = CGPoint(x: 1, y: 0.5) // Справа
+        gradientLayer.cornerRadius = 12
+        gradientLayer.masksToBounds = true
+        gradientLayer.frame = confirmButton.bounds
+        
+        confirmButton.layer.insertSublayer(gradientLayer, at: 0)
     }
     
     private func setupLocationManager() {
@@ -157,6 +192,7 @@ class AddressPickerViewController: UIViewController {
                 self.currentAddress = ""
                 self.confirmButton.isEnabled = false
                 self.confirmButton.alpha = 0.5
+                self.applyGradientToConfirmButton()
                 return
             }
             
@@ -165,10 +201,11 @@ class AddressPickerViewController: UIViewController {
                 self.currentAddress = ""
                 self.confirmButton.isEnabled = false
                 self.confirmButton.alpha = 0.5
+                self.applyGradientToConfirmButton()
                 return
             }
             
-            // Формируем адрес
+            // Формируем адрес (без города)
             var addressComponents: [String] = []
             
             if let street = placemark.thoroughfare {
@@ -177,9 +214,7 @@ class AddressPickerViewController: UIViewController {
             if let houseNumber = placemark.subThoroughfare {
                 addressComponents.append(houseNumber)
             }
-            if let locality = placemark.locality {
-                addressComponents.append(locality)
-            }
+            // Город не добавляем
             
             let address = addressComponents.joined(separator: ", ")
             self.currentAddress = address.isEmpty ? "Выбранная точка на карте" : address
@@ -187,6 +222,8 @@ class AddressPickerViewController: UIViewController {
             
             self.confirmButton.isEnabled = true
             self.confirmButton.alpha = 1.0
+            // Обновляем градиент при изменении состояния
+            self.applyGradientToConfirmButton()
         }
     }
     

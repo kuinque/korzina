@@ -143,8 +143,16 @@ class BasketPresenter: BasketPresenterProtocol {
     
     func didReceivePriceComparisons(_ comparisons: [PriceComparison]) {
         // Товары уже сохранены в кэш в BasketInteractor
-        // Сортируем по цене (сначала дешевые)
+        // Сортируем: текущий магазин первый, остальные по выгоде (от меньшей цены к большей)
         let sortedComparisons = comparisons.sorted { c1, c2 in
+            // Текущий магазин всегда первый
+            if c1.isCurrentShop && !c2.isCurrentShop {
+                return true
+            }
+            if !c1.isCurrentShop && c2.isCurrentShop {
+                return false
+            }
+            // Если оба текущие или оба не текущие, сортируем по цене
             let price1 = c1.totalPrice ?? Double.infinity
             let price2 = c2.totalPrice ?? Double.infinity
             return price1 < price2
@@ -198,8 +206,16 @@ class BasketPresenter: BasketPresenterProtocol {
             allComparisons.append(currentShopComparison)
         }
         
-        // Сортируем по цене (сначала дешевые)
+        // Сортируем: текущий магазин первый, остальные по выгоде (от меньшей цены к большей)
         let sortedComparisons = allComparisons.sorted { c1, c2 in
+            // Текущий магазин всегда первый
+            if c1.isCurrentShop && !c2.isCurrentShop {
+                return true
+            }
+            if !c1.isCurrentShop && c2.isCurrentShop {
+                return false
+            }
+            // Если оба текущие или оба не текущие, сортируем по цене
             let price1 = c1.totalPrice ?? Double.infinity
             let price2 = c2.totalPrice ?? Double.infinity
             return price1 < price2
