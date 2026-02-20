@@ -142,6 +142,7 @@ class AlternativeMatch(BaseModel):
     match_type: MatchType = MatchType.NONE
     similarity: float = 0.0
     is_identical: bool = False
+    is_duplicated: bool = False  # True если товар продублирован из другого магазина
     matched_offer: Optional[Dict[str, Any]] = None
 
 

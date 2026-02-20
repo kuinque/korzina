@@ -9,6 +9,10 @@ pydantic-settings>=2.0.0
 # Fuzzy matching для поиска похожих товаров
 rapidfuzz>=3.6.0
 
+# Image content matching
+Pillow>=10.0.0
+ImageHash>=4.3.1
+
 # Разработка и тестирование
 pytest==8.0.0
 pytest-cov==4.1.0

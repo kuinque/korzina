@@ -52,7 +52,7 @@ class CacheManager:
             offset = 0
 
             while True:
-                result = self.db_client.table("offers") \
+                result = self.db_client.table("analog_offers") \
                     .select("*") \
                     .range(offset, offset + page_size - 1) \
                     .execute()
@@ -179,7 +179,7 @@ class CacheManager:
             True если подключение работает
         """
         try:
-            self.db_client.table("offers").select("offer_id").limit(1).execute()
+            self.db_client.table("analog_offers").select("offer_id").limit(1).execute()
             return True
         except Exception as e:
             logger.error(f"Database health check failed: {e}")
