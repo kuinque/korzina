@@ -9,6 +9,7 @@ from app.core.constants import (
 )
 from app.models import ProductMatch, MatchType
 from app.core.logger import get_logger
+from app.services.title_normalizer import normalize_title
 
 logger = get_logger(__name__)
 
@@ -137,11 +138,11 @@ class ProductService:
         target_lower = target_product.lower()
         target_clean = ProductService.remove_stop_words(target_product)
         target_clean_lower = target_clean.lower()
+        target_normalized = normalize_title(target_product)
         
-        # Минимальный порог для рассмотрения кандидата
         min_threshold = FUZZY_THRESHOLDS['low'] / 100.0
         
-        logger.debug(f"Fuzzy searching for product: '{target_product}' (clean: '{target_clean}')")
+        logger.debug(f"Fuzzy searching for product: '{target_product}' (clean: '{target_clean}', norm: '{target_normalized}')")
         logger.debug(f"Target category: {target_category}, Target price: {target_price}")
         logger.debug(f"Available products count: {len(shop_products)}")
         
@@ -153,15 +154,15 @@ class ProductService:
             product_name_lower = product_name.lower()
             product_clean = product_data["clean_name"]
             product_clean_lower = product_clean.lower()
+            product_normalized = product_data.get("normalized_name") or normalize_title(product_name)
             product_category = product_data.get("category", "")
             product_price = product_data["price"]
 
-            # Рассчитываем fuzzy similarity для обоих вариантов
             fuzzy_full = ProductService.calculate_fuzzy_similarity(target_lower, product_name_lower)
             fuzzy_clean = ProductService.calculate_fuzzy_similarity(target_clean_lower, product_clean_lower)
+            fuzzy_norm = ProductService.calculate_fuzzy_similarity(target_normalized, product_normalized)
             
-            # Берём лучший score
-            fuzzy_score = max(fuzzy_full, fuzzy_clean)
+            fuzzy_score = max(fuzzy_full, fuzzy_clean, fuzzy_norm)
             
             # Пропускаем если ниже минимального порога
             if fuzzy_score < min_threshold:
@@ -176,7 +177,7 @@ class ProductService:
                 if target_lower == product_name_lower:
                     match_type = MatchType.EXACT_FULL
                     match_priority = MATCH_PRIORITIES['exact_full']
-                elif target_clean_lower == product_clean_lower:
+                elif target_clean_lower == product_clean_lower or target_normalized == product_normalized:
                     match_type = MatchType.EXACT_CLEAN
                     match_priority = MATCH_PRIORITIES['exact_clean']
                 else:

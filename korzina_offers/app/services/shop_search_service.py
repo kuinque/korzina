@@ -9,6 +9,7 @@ from app.models import ShopSolution, ProductMatch, SearchRequest, MatchType
 from app.config import config
 from app.core.logger import get_logger
 from app.core.constants import FUZZY_THRESHOLDS, FUZZY_WEIGHTS
+from app.services.title_normalizer import normalize_title
 
 logger = get_logger(__name__)
 
@@ -220,10 +221,12 @@ class ShopSearchService:
                     "categories": {},
                 }
 
+            normalized = normalize_title(title)
             offer_data_item = {
                 "name": title,
                 "price": price,
                 "clean_name": self.product_service.remove_stop_words(title),
+                "normalized_name": normalized,
                 "category": offer.get("category_name", ""),
                 "category_code": category_num,
                 "offer_data": offer
@@ -331,11 +334,12 @@ class ShopSearchService:
 
         for product_name in product_names:
             product_name_lower = product_name.lower()
+            product_name_normalized = normalize_title(product_name)
 
-            # ИСПРАВЛЕНИЕ: Ищем по вхождению подстроки, а не точному совпадению
             for offer in all_offers:
                 title = offer.get("title", "").lower()
-                if product_name_lower in title:  # <-- ЗДЕСЬ ИЗМЕНЕНИЕ
+                title_normalized = normalize_title(title)
+                if product_name_lower in title or product_name_normalized in title_normalized:
                     price_raw = offer.get("price")
                     try:
                         price = float(price_raw) if price_raw else None
@@ -360,20 +364,21 @@ class ShopSearchService:
 
     def _extract_key_words(self, title: str, max_words: int = 6) -> str:
         """
-        Извлечь ключевые слова из названия товара для fuzzy matching
-        
+        Извлечь ключевые слова из названия товара для fuzzy matching.
+
+        Сначала нормализует название (единицы, сокращения, синонимы),
+        затем убирает стоп-слова и берёт первые max_words слов.
+
         Args:
             title: Полное название товара
-            max_words: Максимальное количество слов (по умолчанию 6 для лучшего fuzzy matching)
-            
+            max_words: Максимальное количество слов (по умолчанию 6)
+
         Returns:
             Ключевые слова для поиска
         """
-        # Убираем стоп-слова и извлекаем главное
-        clean = self.product_service.remove_stop_words(title)
+        normalized = normalize_title(title)
+        clean = self.product_service.remove_stop_words(normalized)
 
-        # Для fuzzy matching оставляем больше слов (до max_words)
-        # Это позволяет rapidfuzz лучше находить похожие товары
         words = clean.split()[:max_words]
         result = " ".join(words)
 
@@ -413,57 +418,30 @@ class ShopSearchService:
 
     def _normalize_title_for_identity(self, title: str) -> str:
         """
-        Нормализовать название для определения идентичности
-        
-        Выполняет:
-        - Приведение к нижнему регистру
-        - Удаление предлогов и союзов (с, и, в, на)
-        - Нормализация запятых в числах (4,8% -> 4.8%)
-        - Удаление маркировок (без змж, мжд, бзмж)
-        - Нормализация пробелов (130 г -> 130г)
-        - Нормализация дефисов
-        - Удаление стоп-слов
-        
+        Нормализовать название для определения идентичности.
+
+        Делегирует основную работу в TitleNormalizer (единицы, сокращения,
+        синонимы, маркировки), затем дополнительно убирает стоп-слова
+        и предлоги для максимально «чистого» сравнения.
+
         Args:
             title: Исходное название
-            
+
         Returns:
             Нормализованное название
         """
-        import re
-        
-        # Приводим к нижнему регистру
-        normalized = title.lower()
-        
-        # Нормализуем запятые в числах (4,8% -> 4.8%)
-        normalized = re.sub(r'(\d+),(\d+)', r'\1.\2', normalized)
-        
-        # Удаляем маркировки (без змж, мжд, бзмж, гост и т.д.)
-        markings = ['без змж', 'мжд', 'бзмж', 'гост', 'без', 'змж']
-        for marking in markings:
-            normalized = re.sub(rf'\b{re.escape(marking)}\b', '', normalized, flags=re.IGNORECASE)
-        
-        # Нормализуем пробелы перед единицами измерения (130 г -> 130г)
-        normalized = re.sub(r'(\d+)\s+(г|кг|л|мл|м)', r'\1\2', normalized)
-        
-        # Удаляем стоп-слова
+        normalized = normalize_title(title)
+
         normalized = self.product_service.remove_stop_words(normalized)
-        
-        # Удаляем предлоги и союзы
+
         prepositions = {'с', 'и', 'в', 'на', 'для', 'от', 'до', 'по', 'из', 'к', 'о', 'об', 'со', 'во'}
         words = normalized.split()
         words = [w for w in words if w not in prepositions]
-        
-        # Нормализуем дефисы (заменяем на пробелы для лучшего сравнения)
         normalized = ' '.join(words)
-        normalized = re.sub(r'[-–—]', ' ', normalized)
-        
-        # Удаляем множественные пробелы и запятые
-        normalized = re.sub(r'\s+', ' ', normalized)
-        normalized = re.sub(r',\s*,', ',', normalized)  # Удаляем двойные запятые
-        normalized = re.sub(r'\s*,\s*', ' ', normalized)  # Заменяем запятые на пробелы
+
+        import re
         normalized = re.sub(r'\s+', ' ', normalized).strip()
-        
+
         return normalized
 
     def _is_identical_offer(self, source_offer: Dict[str, Any], matched_offer: Dict[str, Any]) -> bool:
