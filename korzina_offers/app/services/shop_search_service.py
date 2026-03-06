@@ -69,17 +69,13 @@ class ShopSearchService:
     def find_alternatives_for_offers(self, offer_ids: List[int]) -> Dict[str, List[Dict[str, Any]]]:
         """
         Найти альтернативные предложения для списка офферов по всем магазинам
-
-        Args:
-            offer_ids: Список ID исходных офферов
-
-        Returns:
-            Словарь с альтернативами по магазинам
         """
         logger.info(f"=== ALTERNATIVES SEARCH START ===")
         logger.info(f"Searching alternatives for offers: {offer_ids}")
 
         all_offers = cache_manager.get_all_offers()
+
+        # Находим исходные офферы
         selected_offers_map: Dict[int, Dict[str, Any]] = {}
         for offer in all_offers:
             offer_id = offer.get("offer_id")
@@ -97,15 +93,13 @@ class ShopSearchService:
         ]
         logger.info(f"Target offers loaded: {len(target_offers)}")
 
+        # Группируем ВСЕ офферы по продавцам
         sellers_data = self._group_offers_by_sellers(all_offers)
         logger.info(f"Grouped into {len(sellers_data)} sellers")
 
         alternatives: Dict[str, List[Dict[str, Any]]] = {}
         ordered_sellers = sorted(sellers_data.keys())
 
-        logger.debug(f"Processing {len(ordered_sellers)} sellers")
-
-        # Для каждого магазина
         for seller_name in ordered_sellers:
             seller_data = sellers_data[seller_name]
             shop_name = seller_data["name"]
@@ -113,36 +107,43 @@ class ShopSearchService:
 
             logger.debug(f"Processing shop: {shop_name} ({len(seller_data['offers'])} offers)")
 
-            # Для каждого целевого товара
             for idx, target in enumerate(target_offers, 1):
                 target_title = target.get("title", "")
                 target_category_num = target.get("category_code")
                 target_price = self._normalize_price(target.get("price"))
                 target_id = target.get("offer_id")
+                target_tags = target.get("tags") or []  # <-- ИЗВЛЕКАЕМ ТЕГИ
 
                 search_query = self._extract_key_words(target_title)
 
-                logger.info(
-                    f"  [{idx}/{len(target_offers)}] Target: '{target_title[:60]}...'"
-                )
-                logger.info(f"    Keywords: '{search_query}', category_num: '{target_category_num}'")
+                logger.info(f"  [{idx}/{len(target_offers)}] Target: '{target_title[:60]}...'")
+                logger.info(f"    Extracted keywords: '{search_query}'")
+                logger.info(f"    Target tags: {target_tags}")  # <-- ЛОГИРУЕМ ТЕГИ
 
-                # Ищем лучший вариант с подъёмом по иерархии категорий
+                # ФИЛЬТРУЕМ товары магазина по тегам исходного оффера
+                if target_tags:
+                    filtered_shop_products = {
+                        offer_id: product
+                        for offer_id, product in seller_data["offers"].items()
+                        if self._has_matching_tag(product, target_tags)
+                    }
+                    logger.info(
+                        f"    Filtered by tags: {len(filtered_shop_products)} products (was {len(seller_data['offers'])})")
+                else:
+                    filtered_shop_products = seller_data["offers"]
+
+                # Ищем лучший вариант среди ОТФИЛЬТРОВАННЫХ товаров
                 top_matches = self._find_top_matches(
                     search_query=search_query,
-                    seller_data=seller_data,
-                    target_category_num=target_category_num,
+                    shop_products=filtered_shop_products,  # <-- ФИЛЬТРОВАННЫЕ
+                    target_category=target_category,
                     target_price=target_price,
                     limit=1
                 )
 
                 logger.info(f"    Found {len(top_matches)} matches in {shop_name}")
 
-                # Минимальный порог похожести для принятия найденного товара
-                min_acceptable_similarity = FUZZY_THRESHOLDS['medium'] / 100.0  # 60%
-
-                # Добавляем лучший вариант с offer_number: 1
-                if top_matches and top_matches[0]["similarity"] >= min_acceptable_similarity:
+                if top_matches:
                     match = top_matches[0]
                     matched_offer = match["offer"]
                     
@@ -163,12 +164,6 @@ class ShopSearchService:
                     if is_identical:
                         logger.info(f"    ✓ Identical offer found in {shop_name}")
                 else:
-                    # Если не найдено или похожесть слишком низкая — дублируем исходный товар
-                    if top_matches:
-                        logger.info(f"    ✗ Best match similarity {top_matches[0]['similarity']:.2f} < {min_acceptable_similarity:.2f}, duplicating instead")
-                    
-                    duplicated_offer = self._create_duplicated_offer(target, shop_name)
-                    
                     shop_matches.append({
                         "offer_number": 1,
                         "target_offer_id": target_id,
@@ -188,6 +183,24 @@ class ShopSearchService:
         logger.info(f"Total shops processed: {len(alternatives)}")
 
         return alternatives
+
+    def _has_matching_tag(self, product: Dict[str, Any], target_tags: List[str]) -> bool:
+        """
+        Проверить, есть ли у товара хотя бы один совпадающий тег
+
+        Args:
+            product: Данные товара из seller_data["offers"]
+            target_tags: Теги исходного оффера
+
+        Returns:
+            True если есть совпадение
+        """
+        # Теги хранятся в offer_data
+        offer_data = product.get("offer_data", {})
+        product_tags = offer_data.get("tags") or []
+
+        # Проверяем пересечение тегов
+        return bool(set(target_tags) & set(product_tags))
 
     def _group_offers_by_sellers(self, all_offers: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         """
