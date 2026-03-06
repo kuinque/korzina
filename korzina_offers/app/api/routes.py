@@ -145,6 +145,42 @@ async def get_offers(
 
 
 @router.get(
+    "/offer",
+    summary="Получить информацию об оффере",
+    description="Получить полную информацию об оффере по его ID"
+)
+async def get_offer(
+    offer_id: str = Query(..., description="ID оффера")
+):
+    """Получить полную информацию об оффере по ID"""
+    try:
+        all_offers = cache_manager.get_all_offers()
+        
+        # Ищем оффер по ID
+        for offer in all_offers:
+            if str(offer.get("offer_id")) == str(offer_id):
+                return {
+                    "status": "success",
+                    "offer": offer
+                }
+        
+        # Если не нашли
+        raise HTTPException(
+            status_code=404,
+            detail=f"Offer with id '{offer_id}' not found"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting offer: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error"
+        )
+
+
+@router.get(
     "/products",
     summary="Получить предложения продавца",
     description="Получить список предложений для конкретного продавца с опциональным поиском"
