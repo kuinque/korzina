@@ -18,6 +18,7 @@ class Offer(BaseModel):
     category_name: Optional[str] = None
     tags: Optional[List[str]] = None
     seller_name: Optional[str] = None
+    subcategory: Optional[str] = None
 
 
 class MatchType(str, Enum):
