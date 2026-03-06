@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Optional
 from rapidfuzz import fuzz
 from app.database.client import cache_manager
 from app.services.product_service import ProductService
-from app.models import ShopSolution, ProductMatch, SearchRequest, MatchType
+from app.models import ShopSolution, ProductMatch, SearchRequest, MatchType, offer_to_response
 from app.config import config
 from app.core.logger import get_logger
 from app.core.constants import FUZZY_THRESHOLDS, FUZZY_WEIGHTS
@@ -666,16 +666,23 @@ class ShopSearchService:
                 match_type = self._determine_match_type(
                     best_score, search_query, product_name, product_clean
                 )
-                matches.append({
-                    "offer_id": offer_id,
-                    "similarity": final_score,
-                    "match_type": match_type,
-                    "offer": product.get("offer_data") or {
+                offer_data = product.get("offer_data")
+                offer_payload = (
+                    offer_data
+                    if offer_data
+                    else offer_to_response({
                         "offer_id": offer_id,
                         "title": product_name,
                         "price": product.get("price"),
                         "category_name": product.get("category"),
-                    }
+                        **(product.get("offer_data") or {}),
+                    })
+                )
+                matches.append({
+                    "offer_id": offer_id,
+                    "similarity": final_score,
+                    "match_type": match_type,
+                    "offer": offer_payload,
                 })
         
         return matches
@@ -826,21 +833,15 @@ class ShopSearchService:
         if new_price < 0.99:
             new_price = math.floor(original_price) + 0.99
         
-        # Создаём копию оффера
+        # Создаём копию оффера на базе единой структуры
         duplicated = {
-            "offer_id": source_offer.get("offer_id"),  # Сохраняем оригинальный ID
-            "title": source_offer.get("title"),
-            "description": source_offer.get("description"),
+            **offer_to_response(source_offer),
             "price": new_price,
-            "original_price": original_price,  # Сохраняем оригинальную цену
-            "currency": source_offer.get("currency"),
-            "category_name": source_offer.get("category_name"),
+            "original_price": original_price,
+            "seller_name": target_shop,
+            "original_seller": source_offer.get("seller_name"),
             "category_code": source_offer.get("category_code"),
-            "seller_name": target_shop,  # Меняем магазин
-            "original_seller": source_offer.get("seller_name"),  # Сохраняем оригинальный магазин
-            "images": source_offer.get("images", []),
-            "tags": source_offer.get("tags", []),
-            "is_duplicated": True,  # Помечаем как дубликат
+            "is_duplicated": True,
         }
         
         logger.debug(

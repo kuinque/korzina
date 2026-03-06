@@ -18,6 +18,35 @@ class Offer(BaseModel):
     category_name: Optional[str] = None
     tags: Optional[List[str]] = None
     seller_name: Optional[str] = None
+    subcategory: Optional[str] = None
+
+
+def offer_to_response(offer: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Единая структура оффера для ответов API.
+    Принимает сырой оффер (из кэша/БД) или частичный dict, возвращает нормализованный dict
+    с полями id/offer_id, name/title, category/category_name для совместимости с разными эндпоинтами.
+    """
+    title = offer.get("title", "")
+    category_name = offer.get("category_name")
+    seller_name = offer.get("seller_name")
+    return {
+        "offer_id": offer.get("offer_id"),
+        "id": offer.get("offer_id"),
+        "title": title,
+        "name": title,
+        "description": offer.get("description"),
+        "price": offer.get("price", 0),
+        "currency": offer.get("currency"),
+        "images": offer.get("images", []),
+        "category_id": offer.get("category_id"),
+        "category_name": category_name,
+        "category": category_name,
+        "tags": offer.get("tags", []),
+        "seller_name": seller_name,
+        "seller": seller_name,  # алиас для совместимости
+        "subcategory": offer.get("subcategory"),
+    }
 
 
 class MatchType(str, Enum):

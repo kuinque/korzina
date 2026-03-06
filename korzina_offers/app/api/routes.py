@@ -12,7 +12,8 @@ from app.models import (
     ErrorResponse,
     ProductMatch,
     AlternativesRequest,
-    AlternativesResponse
+    AlternativesResponse,
+    offer_to_response,
 )
 from app.services.shop_search_service import ShopSearchService
 from app.database.client import cache_manager
@@ -207,16 +208,7 @@ async def get_products(
         offers = cache_manager.get_offers_by_seller(shop)
 
         # Формируем список предложений
-        offers_list = []
-        for offer in offers:
-            offers_list.append({
-                "id": offer["offer_id"],
-                "name": offer.get("title", ""),
-                "price": offer.get("price", 0),
-                "description": offer.get("description"),
-                "category": offer.get("category_name"),
-                "images": offer.get("images", [])
-            })
+        offers_list = [offer_to_response(offer) for offer in offers]
 
         if q:
             qlower = q.lower()
@@ -394,14 +386,7 @@ async def compare_prices(
                 shop_products[shop_name] = []
 
             shop_totals[shop_name] += price
-            shop_products[shop_name].append({
-                "id": offer.get("offer_id"),
-                "name": offer.get("title"),
-                "price": price,
-                "category": offer.get("category_name"),
-                "description": offer.get("description"),
-                "images": offer.get("images", [])
-            })
+            shop_products[shop_name].append(offer_to_response(offer))
 
         # Находим самый дешевый магазин
         cheapest_shop = min(shop_totals.items(), key=lambda x: x[1])
@@ -552,12 +537,7 @@ async def debug_search_in_cache(q: str = Query(..., description="Что иска
         for offer in all_offers:
             title = str(offer.get("title", "")).lower()
             if q_lower in title:
-                found.append({
-                    "offer_id": offer.get("offer_id"),
-                    "title": offer.get("title"),
-                    "seller": offer.get("seller_name"),
-                    "price": offer.get("price")
-                })
+                found.append(offer_to_response(offer))
 
         return {
             "query": q,
