@@ -1,6 +1,7 @@
 """
 Сервис для поиска магазинов
 """
+import re
 from typing import List, Dict, Any, Optional
 from rapidfuzz import fuzz
 from app.database.client import cache_manager
@@ -8,17 +9,252 @@ from app.services.product_service import ProductService
 from app.models import ShopSolution, ProductMatch, SearchRequest, MatchType, offer_to_response
 from app.config import config
 from app.core.logger import get_logger
-from app.core.constants import FUZZY_THRESHOLDS, FUZZY_WEIGHTS
+from app.core.constants import FUZZY_THRESHOLDS, FUZZY_WEIGHTS, CORRIDOR_SETTINGS
 from app.services.title_normalizer import normalize_title
 
 logger = get_logger(__name__)
 
+# Регулярки для извлечения веса из названия (в граммах)
+_RE_WEIGHT_KG = re.compile(r'(\d+)[.,](\d+)\s*кг', re.IGNORECASE)
+_RE_WEIGHT_KG_WHOLE = re.compile(r'(?<!\d[.,])(\d+)\s*кг(?=\b|\s|$)', re.IGNORECASE)
+_RE_WEIGHT_G = re.compile(r'(\d+)\s*(?:г|гр)(?=\b|\s|$)', re.IGNORECASE)
+
+# Регулярки для извлечения объёма (в миллилитрах)
+_RE_VOLUME_L = re.compile(r'(\d+)[.,](\d+)\s*л(?:итр)?', re.IGNORECASE)
+_RE_VOLUME_L_WHOLE = re.compile(r'(?<!\d[.,])(\d+)\s*л(?:итр)?(?=\b|\s|$)', re.IGNORECASE)
+_RE_VOLUME_ML = re.compile(r'(\d+)\s*мл', re.IGNORECASE)
+_RE_FAT_PERCENT = re.compile(r'(\d+[.,]?\d*)\s*%', re.IGNORECASE)
 
 class ShopSearchService:
     """Сервис для поиска оптимального магазина"""
 
     def __init__(self):
         self.product_service = ProductService()
+
+    # =========================================================================
+    # МЕТОДЫ ИЗВЛЕЧЕНИЯ ВЕСА/ОБЪЁМА
+    # =========================================================================
+
+    def _extract_weight_from_title(self, title: str) -> Optional[float]:
+        """
+        Извлечь вес из названия товара.
+        Возвращает вес в граммах или None если не найден.
+        """
+        if not title:
+            return None
+
+        title_lower = title.lower()
+
+        # Килограммы с дробной частью: 0.5кг, 1,5кг → граммы
+        match = _RE_WEIGHT_KG.search(title_lower)
+        if match:
+            whole = int(match.group(1))
+            frac_str = match.group(2)
+            frac = int(frac_str)
+            divisor = 10 ** len(frac_str)
+            return (whole + frac / divisor) * 1000
+
+        # Целые килограммы: 1кг, 2кг → граммы
+        match = _RE_WEIGHT_KG_WHOLE.search(title_lower)
+        if match:
+            return int(match.group(1)) * 1000
+
+        # Граммы: 100г, 200гр
+        match = _RE_WEIGHT_G.search(title_lower)
+        if match:
+            return float(match.group(1))
+
+        return None
+
+    def _extract_fat_percent(self, title: str) -> Optional[float]:
+        """
+        Извлечь жирность из названия товара.
+        Возвращает жирность в процентах или None если не найдена.
+        """
+        if not title:
+            return None
+
+        match = _RE_FAT_PERCENT.search(title)
+        if match:
+            fat_str = match.group(1).replace(',', '.')
+            try:
+                return float(fat_str)
+            except ValueError:
+                return None
+
+        return None
+
+    def _extract_volume_from_title(self, title: str) -> Optional[float]:
+        """
+        Извлечь объём из названия товара.
+        Возвращает объём в миллилитрах или None если не найден.
+        """
+        if not title:
+            return None
+
+        title_lower = title.lower()
+
+        # Литры с дробной частью: 0.9л, 1,5л → миллилитры
+        match = _RE_VOLUME_L.search(title_lower)
+        if match:
+            whole = int(match.group(1))
+            frac_str = match.group(2)
+            frac = int(frac_str)
+            divisor = 10 ** len(frac_str)
+            return (whole + frac / divisor) * 1000
+
+        # Целые литры: 1л, 2л → миллилитры
+        match = _RE_VOLUME_L_WHOLE.search(title_lower)
+        if match:
+            return int(match.group(1)) * 1000
+
+        # Миллилитры: 100мл, 500мл
+        match = _RE_VOLUME_ML.search(title_lower)
+        if match:
+            return float(match.group(1))
+
+        return None
+
+    def _extract_quantity_from_title(self, title: str) -> Optional[float]:
+        """
+        Извлечь количество (вес или объём) из названия.
+        Сначала пробует вес, потом объём.
+        """
+        weight = self._extract_weight_from_title(title)
+        if weight is not None:
+            return weight
+
+        volume = self._extract_volume_from_title(title)
+        if volume is not None:
+            return volume
+
+        return None
+
+        # =========================================================================
+        # МЕТОДЫ ПРОВЕРКИ КОРИДОРА
+        # =========================================================================
+
+    def _is_in_price_corridor(
+            self,
+            target_price: Optional[float],
+            candidate_price: Optional[float],
+            tolerance: float = None
+    ) -> bool:
+        """Проверить, попадает ли цена кандидата в коридор."""
+        if tolerance is None:
+            tolerance = CORRIDOR_SETTINGS['price_tolerance']
+
+        if not target_price or not candidate_price or target_price <= 0:
+            return True  # Нельзя сравнить — пропускаем проверку
+
+        ratio = candidate_price / target_price
+        return (1 - tolerance) <= ratio <= (1 + tolerance)
+
+    def _is_in_weight_corridor(
+            self,
+            target_title: str,
+            candidate_title: str,
+            tolerance: float = None
+    ) -> bool:
+        """Проверить, попадает ли вес/объём кандидата в коридор."""
+        if tolerance is None:
+            tolerance = CORRIDOR_SETTINGS['weight_tolerance']
+
+        target_qty = self._extract_quantity_from_title(target_title)
+        candidate_qty = self._extract_quantity_from_title(candidate_title)
+
+        if target_qty is None or candidate_qty is None or target_qty <= 0:
+            return True  # Нельзя сравнить — пропускаем
+
+        ratio = candidate_qty / target_qty
+        return (1 - tolerance) <= ratio <= (1 + tolerance)
+
+    def _is_in_corridor(
+            self,
+            target_offer: Dict[str, Any],
+            candidate_offer: Dict[str, Any]
+    ) -> bool:
+        """
+        Проверить, попадает ли кандидат в коридор по цене И весу.
+        """
+        target_price = self._normalize_price(target_offer.get("price"))
+        candidate_price = self._normalize_price(candidate_offer.get("price"))
+
+        if not self._is_in_price_corridor(target_price, candidate_price):
+            return False
+
+        target_title = target_offer.get("title", "")
+        candidate_title = candidate_offer.get("title", "")
+
+        if not self._is_in_weight_corridor(target_title, candidate_title):
+            return False
+
+        return True
+
+    def _find_best_alternative_with_corridor(
+            self,
+            target_offer: Dict[str, Any],
+            search_query: str,
+            seller_data: Dict[str, Any],
+            target_category_num: Optional[str],
+            target_price: Optional[float]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Найти лучшую альтернативу с учётом коридора цены/веса.
+
+        Алгоритм:
+        1. Ищем все совпадения (до 20)
+        2. Фильтруем по коридору
+        3. Если в коридоре есть матч с достаточным similarity — берём его
+        4. Иначе — берём лучший общий матч
+        """
+        min_sim_corridor = CORRIDOR_SETTINGS['min_similarity_in_corridor']
+        min_sim_fallback = CORRIDOR_SETTINGS['min_similarity_fallback']
+
+        # Получаем ВСЕ совпадения
+        all_matches = self._find_top_matches(
+            search_query=search_query,
+            seller_data=seller_data,
+            target_category_num=target_category_num,
+            target_price=target_price,
+            limit=20
+        )
+
+        if not all_matches:
+            return None
+
+        # Разделяем на матчи в коридоре и вне
+        matches_in_corridor = []
+
+        for match in all_matches:
+            candidate_offer = match.get("offer", {})
+            if self._is_in_corridor(target_offer, candidate_offer):
+                match["in_corridor"] = True
+                matches_in_corridor.append(match)
+            else:
+                match["in_corridor"] = False
+
+        logger.debug(
+            f"    Corridor: {len(matches_in_corridor)} in, "
+            f"{len(all_matches) - len(matches_in_corridor)} out"
+        )
+
+        # Пробуем взять лучший из коридора
+        if matches_in_corridor:
+            best_in_corridor = matches_in_corridor[0]
+            if best_in_corridor["similarity"] >= min_sim_corridor:
+                logger.debug(f"    ✓ Using match from corridor: sim={best_in_corridor['similarity']:.2f}")
+                return best_in_corridor
+            else:
+                logger.debug(f"    ⚠ Best in corridor has low sim: {best_in_corridor['similarity']:.2f}")
+
+        # Fallback: лучший матч без учёта коридора
+        best_overall = all_matches[0]
+        if best_overall["similarity"] >= min_sim_fallback:
+            logger.debug(f"    → Fallback to best overall: sim={best_overall['similarity']:.2f}")
+            return best_overall
+
+        return None
 
     def find_cheapest_shop(self, search_request: SearchRequest) -> Optional[ShopSolution]:
         """
@@ -132,19 +368,29 @@ class ShopSearchService:
                 else:
                     filtered_shop_products = seller_data["offers"]
 
-                # Ищем лучший вариант среди ОТФИЛЬТРОВАННЫХ товаров
-                top_matches = self._find_top_matches(
+                # Создаём отфильтрованные данные магазина (ВЫНЕСЕНО ИЗ else!)
+                filtered_seller_data = {
+                    "name": seller_data["name"],
+                    "offers": filtered_shop_products,
+                    "categories": self._filter_categories_by_offers(
+                        seller_data.get("categories", {}),
+                        filtered_shop_products
+                    )
+                }
+
+                # Ищем лучшую альтернативу С УЧЁТОМ КОРИДОРА
+                best_match = self._find_best_alternative_with_corridor(
+                    target_offer=target,
                     search_query=search_query,
-                    shop_products=filtered_shop_products,  # <-- ФИЛЬТРОВАННЫЕ
-                    target_category=target_category,
-                    target_price=target_price,
-                    limit=1
+                    seller_data=filtered_seller_data,
+                    target_category_num=target_category_num,
+                    target_price=target_price
                 )
 
-                logger.info(f"    Found {len(top_matches)} matches in {shop_name}")
+                logger.info(f"    Found match in {shop_name}: {best_match is not None}")
 
-                if top_matches:
-                    match = top_matches[0]
+                if best_match:
+                    match = best_match
                     matched_offer = match["offer"]
                     
                     # Проверяем, идентичен ли найденный оффер исходному
@@ -164,6 +410,7 @@ class ShopSearchService:
                     if is_identical:
                         logger.info(f"    ✓ Identical offer found in {shop_name}")
                 else:
+                    duplicated_offer = self._create_duplicated_offer(target, shop_name)
                     shop_matches.append({
                         "offer_number": 1,
                         "target_offer_id": target_id,
@@ -183,6 +430,22 @@ class ShopSearchService:
         logger.info(f"Total shops processed: {len(alternatives)}")
 
         return alternatives
+
+    def _filter_categories_by_offers(
+            self,
+            categories: Dict[str, Dict[int, Dict[str, Any]]],
+            allowed_offers: Dict[int, Dict[str, Any]]
+    ) -> Dict[str, Dict[int, Dict[str, Any]]]:
+        """Отфильтровать категории, оставив только разрешённые офферы."""
+        filtered = {}
+        allowed_ids = set(allowed_offers.keys())
+
+        for cat_num, cat_offers in categories.items():
+            filtered_cat = {oid: p for oid, p in cat_offers.items() if oid in allowed_ids}
+            if filtered_cat:
+                filtered[cat_num] = filtered_cat
+
+        return filtered
 
     def _has_matching_tag(self, product: Dict[str, Any], target_tags: List[str]) -> bool:
         """
@@ -660,7 +923,17 @@ class ShopSearchService:
                     if price_diff <= 0.3:
                         price_bonus = 0.05 * (1 - price_diff / 0.3)
 
-            final_score = min(best_score + price_bonus, 1.0)
+            # Бонус за совпадение жирности
+            fat_bonus = 0.0
+            target_fat = self._extract_fat_percent(search_query)
+            product_fat = self._extract_fat_percent(product_name)
+            if target_fat is not None and product_fat is not None:
+                if target_fat == product_fat:
+                    fat_bonus = 0.10  # +10% за точное совпадение жирности
+                elif abs(target_fat - product_fat) <= 0.5:
+                    fat_bonus = 0.05  # +5% за близкую жирность (±0.5%)
+
+            final_score = min(best_score + price_bonus + fat_bonus, 1.0)
 
             if final_score >= min_threshold:
                 match_type = self._determine_match_type(
