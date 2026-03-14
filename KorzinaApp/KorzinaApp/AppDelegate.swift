@@ -13,7 +13,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        // Инициализируем OrderHistoryManager при запуске приложения
+        // Это гарантирует, что он будет подписан на уведомления о новых заказах
+        _ = OrderHistoryManager.shared
         return true
     }
 

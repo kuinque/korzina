@@ -36,11 +36,14 @@ class MainPresenter: MainPresenterProtocol {
     
     func presentStores() {
         let stores = [
-            StoreViewModel(imageName: "ashan", storeName: "Ашан"),
-            StoreViewModel(imageName: "perek", storeName: "Перекресток"),
+            StoreViewModel(imageName: "pyaterochka", storeName: "Пятёрочка"),
+            StoreViewModel(imageName: "perek", storeName: "Перекрёсток"),
             StoreViewModel(imageName: "lenta", storeName: "Лента"),
-            StoreViewModel(imageName: "pyaterochka", storeName: "Пятерочка"),
-            StoreViewModel(imageName: "magnit", storeName: "Магнит")
+            StoreViewModel(imageName: "magnit", storeName: "Магнит"),
+            StoreViewModel(imageName: "ashan", storeName: "Ашан"),
+            StoreViewModel(imageName: "dixi", storeName: "Дикси"),
+            StoreViewModel(imageName: "azbuka", storeName: "Азбука Вкуса"),
+            StoreViewModel(imageName: "metro", storeName: "Метро")
         ]
         view?.displayStores(stores)
     }

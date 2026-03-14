@@ -103,6 +103,24 @@ class SearchRequest(BaseModel):
         return products
 
 
+class ComparePricesRequest(BaseModel):
+    """Запрос на сравнение цен (позволяет пустые списки)"""
+    products: List[str] = []
+    
+    @field_validator('products', mode='before')
+    @classmethod
+    def validate_products(cls, v: Union[List[str], str]) -> List[str]:
+        """Валидация и преобразование товаров"""
+        if isinstance(v, str):
+            products = [name.strip() for name in v.split(",") if name.strip()]
+        elif isinstance(v, list):
+            products = [str(p).strip() for p in v if str(p).strip()]
+        else:
+            raise ValueError("Products must be either a string or a list")
+        
+        return products
+
+
 class SearchResponse(BaseModel):
     """Ответ на поиск товаров"""
     status: str
