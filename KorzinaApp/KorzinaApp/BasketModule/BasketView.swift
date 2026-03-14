@@ -52,6 +52,14 @@ class BasketView: UIViewController {
     private var shopOrder: [String] = [] // Сохраняем порядок магазинов (без текущего)
     private var selectedShopName: String?
     
+    // Состояние экрана альтернатив
+    private var isAlternativesPresented = false
+    
+    // Кэш альтернатив: ключ — оригинальное имя товара, значение — загруженные альтернативы
+    private var alternativesCache: [String: [ProductViewModel]] = [:]
+    // Оригинальные offerId для повторных запросов после замены товара
+    private var alternativesOriginalOfferId: [String: Int] = [:]
+    
     // Вычисляем лучшую цену один раз для всех карточек
     private var bestPrice: Double? {
         let availablePrices = priceComparisons
@@ -117,12 +125,12 @@ class BasketView: UIViewController {
         setUpBasketTitle()
         setUpMenuButton()
         setUpPriceComparison() // Добавляем scrollview сравнения цен
-        setUpCart() // Сначала создаем cartContainerView
-        setUpTableView() // Затем устанавливаем constraints для tableView, которые ссылаются на cartContainerView
+        setUpCart() // Сначала создаем кнопку "заказать", чтобы она была поверх tableView
+        setUpTableView() // Затем tableView, который тянется до низа экрана под плавающей кнопкой
     }
     
     private func setUpBackgroundBlocks() {
-        // Первый белый блок (верхний) - высота 115, нижние углы закруглены
+        // Первый белый блок (верхний) - от верха экрана до 56px ниже safeArea, нижние углы закруглены
         topWhiteBlock.backgroundColor = .white
         topWhiteBlock.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(topWhiteBlock)
@@ -133,11 +141,11 @@ class BasketView: UIViewController {
         view.addSubview(bottomWhiteBlock)
         
         NSLayoutConstraint.activate([
-            // Первый блок: сверху экрана, высота 115
+            // Первый блок: сверху экрана до 56px ниже safeArea (адаптивная высота)
             topWhiteBlock.topAnchor.constraint(equalTo: view.topAnchor),
             topWhiteBlock.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             topWhiteBlock.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            topWhiteBlock.heightAnchor.constraint(equalToConstant: 115),
+            topWhiteBlock.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 56),
             
             // Второй блок: на 7 пикселей ниже первого, до конца экрана
             bottomWhiteBlock.topAnchor.constraint(equalTo: topWhiteBlock.bottomAnchor, constant: 7),
@@ -211,7 +219,7 @@ class BasketView: UIViewController {
         
         NSLayoutConstraint.activate([
             menuButton.topAnchor.constraint(equalTo: basketTitleLabel.topAnchor, constant: -5),
-            menuButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 328.5),
+            menuButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
             menuButton.widthAnchor.constraint(equalToConstant: 44),
             menuButton.heightAnchor.constraint(equalToConstant: 44)
         ])
@@ -358,8 +366,11 @@ class BasketView: UIViewController {
             gradientLayer.frame = orderButton.bounds
         }
         
-        // Убеждаемся, что кнопка "заказать" всегда поверх всех элементов
-        view.bringSubviewToFront(orderButton)
+        // Убеждаемся, что кнопка "заказать" всегда поверх всех элементов,
+        // кроме случая, когда открыт экран выбора альтернатив
+        if !isAlternativesPresented {
+            view.bringSubviewToFront(orderButton)
+        }
     }
     
     func setShopHeader(for shopName: String) {
@@ -428,8 +439,14 @@ class BasketView: UIViewController {
             tableView.topAnchor.constraint(equalTo: priceComparisonScrollView.bottomAnchor, constant: 20),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            tableView.bottomAnchor.constraint(equalTo: orderButton.topAnchor, constant: -8)
+            // Тянем tableView до низа экрана, кнопка "заказать" плавает поверх
+            tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
+        
+        // Отступы, чтобы нижние товары не прятались под плавающей кнопкой
+        let bottomInset: CGFloat = 97 // высота кнопки + отступы, как на экране магазинов
+        tableView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: bottomInset, right: 0)
+        tableView.scrollIndicatorInsets = UIEdgeInsets(top: 0, left: 0, bottom: bottomInset, right: 0)
     }
     
     private func setUpCart() {
@@ -478,7 +495,7 @@ class BasketView: UIViewController {
         view.addSubview(orderButton)
         
         NSLayoutConstraint.activate([
-            orderButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 77),
+            orderButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             orderButton.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -34),
             orderButton.widthAnchor.constraint(equalToConstant: 242),
             orderButton.heightAnchor.constraint(equalToConstant: 53)
@@ -731,9 +748,10 @@ extension BasketView: BasketViewProtocol {
         // Зеленая обводка и овал "лучшая цена" показываются только если магазин выбран И имеет лучшую цену
         let showBestPriceIndicator = isSelectedShop && isBestPrice
         
-        // Овальная карточка 143x51, цвет F3F3F3 (как у карточек товаров в ShopView)
+        // Карточка магазина 143x51, цвет F3F3F3 (как у карточек товаров в ShopView)
         cardView.backgroundColor = UIColor(hex: "F3F3F3") ?? .systemGray6
-        cardView.layer.cornerRadius = 25.5 // Половина от 51 для овала
+        cardView.layer.cornerRadius = 16 // Уменьшенный радиус для менее круглой формы
+        cardView.layer.cornerCurve = .continuous // Плавное закругление
         cardView.clipsToBounds = false // Отключаем обрезку, чтобы овалы могли выходить за границы и не перекрывались обводкой
         cardView.translatesAutoresizingMaskIntoConstraints = false
         
@@ -925,7 +943,7 @@ extension BasketView: BasketViewProtocol {
         // Создаем отдельный слой для обводки, который будет под овалами
         let borderLayer = CAShapeLayer()
         borderLayer.frame = cardView.bounds
-        borderLayer.path = UIBezierPath(roundedRect: cardView.bounds, cornerRadius: 25.5).cgPath
+        borderLayer.path = UIBezierPath(roundedRect: cardView.bounds, cornerRadius: 16).cgPath
         borderLayer.fillColor = UIColor.clear.cgColor
         
         if showBestPriceIndicator {
@@ -947,7 +965,7 @@ extension BasketView: BasketViewProtocol {
         // Обновляем frame border layer после установки constraints
         DispatchQueue.main.async {
             borderLayer.frame = cardView.bounds
-            borderLayer.path = UIBezierPath(roundedRect: cardView.bounds, cornerRadius: 25.5).cgPath
+            borderLayer.path = UIBezierPath(roundedRect: cardView.bounds, cornerRadius: 16).cgPath
         }
         
         // Убеждаемся, что овалы находятся поверх обводки карточки
@@ -1234,7 +1252,20 @@ extension BasketView: UITableViewDataSource, UITableViewDelegate {
     }
     
     private func showAlternativesPopup(for item: CartItem) {
-        guard let offerId = item.product.offerId,
+        // Ключ кэша — оригинальное имя товара, чтобы при замене на альтернативу список не менялся
+        let cacheKey = item.originalProductName ?? item.product.name
+        
+        if let cached = alternativesCache[cacheKey] {
+            if cached.isEmpty {
+                showAlert(title: "Нет альтернатив", message: "Не найдено других похожих товаров в этом магазине")
+            } else {
+                presentAlternativesSheet(alternatives: cached, for: item)
+            }
+            return
+        }
+        
+        // Для запроса используем offerId из кэша альтернатив или оригинальный offerId
+        guard let offerId = alternativesOriginalOfferId[cacheKey] ?? item.product.offerId,
               let shopName = selectedShopName else {
             print("⚠️ Cannot show alternatives: missing offerId or shopName")
             return
@@ -1242,7 +1273,6 @@ extension BasketView: UITableViewDataSource, UITableViewDelegate {
         
         print("🔍 Loading alternatives for offer \(offerId) in \(shopName)")
         
-        // Показываем индикатор загрузки
         let loadingAlert = UIAlertController(title: nil, message: "Загрузка альтернатив...", preferredStyle: .alert)
         let loadingIndicator = UIActivityIndicatorView(frame: CGRect(x: 10, y: 5, width: 50, height: 50))
         loadingIndicator.hidesWhenStopped = true
@@ -1251,11 +1281,15 @@ extension BasketView: UITableViewDataSource, UITableViewDelegate {
         loadingAlert.view.addSubview(loadingIndicator)
         present(loadingAlert, animated: true)
         
-        // Запрос к API
+        // Запоминаем оригинальный offerId для будущих запросов
+        alternativesOriginalOfferId[cacheKey] = offerId
+        
         fetchAlternatives(offerId: offerId, shopName: shopName) { [weak self] alternatives in
             DispatchQueue.main.async {
                 loadingAlert.dismiss(animated: true) {
                     guard let self = self else { return }
+                    
+                    self.alternativesCache[cacheKey] = alternatives
                     
                     if alternatives.isEmpty {
                         self.showAlert(title: "Нет альтернатив", message: "Не найдено других похожих товаров в этом магазине")
@@ -1304,6 +1338,7 @@ extension BasketView: UITableViewDataSource, UITableViewDelegate {
                     imageURL: images?.first,
                     description: offerData["description"] as? String,
                     category: offerData["category_name"] as? String,
+                    subcategory: offerData["subcategory"] as? String,
                     offerId: offerData["offer_id"] as? Int
                 )
             }
@@ -1313,83 +1348,165 @@ extension BasketView: UITableViewDataSource, UITableViewDelegate {
     }
     
     private func presentAlternativesSheet(alternatives: [ProductViewModel], for item: CartItem) {
-        // Создаем затемненный фон
+        isAlternativesPresented = true
+
+        // Находим оригинальный товар из основной корзины
+        let originalName = item.originalProductName ?? item.product.name
+        let originalCartItem = CartManager.shared.getAllCartItems()
+            .first(where: { $0.product.name == originalName || $0.matchesProduct(named: originalName) })
+
+        // Авто-выбранная альтернатива — это item.product (то, что сейчас в кэше выбранного магазина).
+        // Остальные — результаты API, не совпадающие с уже выбранным.
+        let autoSelectedId = item.product.offerId
+        let otherAlternatives = alternatives.filter { $0.offerId != autoSelectedId && $0.name != item.product.name }
+
+        // Затемнённый фон
         let dimView = UIView(frame: view.bounds)
         dimView.backgroundColor = UIColor.black.withAlphaComponent(0.5)
         dimView.tag = 999
         view.addSubview(dimView)
-        
-        // Контейнер для popup
-        let containerHeight: CGFloat = min(CGFloat(alternatives.count) * 100 + 120, 500)
+
+        // Контейнер — от 122pt сверху до низа экрана (вмещает 4 альтернативы + оригинал)
         let containerView = UIView()
         containerView.backgroundColor = .systemBackground
-        containerView.layer.cornerRadius = 16
+        containerView.layer.cornerRadius = 20
+        containerView.layer.masksToBounds = true
         containerView.tag = 1000
         containerView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(containerView)
-        
+
         NSLayoutConstraint.activate([
-            containerView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            containerView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            containerView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            containerView.heightAnchor.constraint(equalToConstant: containerHeight)
+            containerView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            containerView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            containerView.topAnchor.constraint(equalTo: view.topAnchor, constant: 122),
+            containerView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -133)
         ])
-        
-        // Заголовок
+
+        // Заголовок (слева вверху)
         let titleLabel = UILabel()
-        titleLabel.text = "Выберите альтернативу"
-        titleLabel.font = UIFont.onestBold(size: 18)
-        titleLabel.textAlignment = .center
+        titleLabel.text = "Товара нет в выбранном магазине"
+        titleLabel.font = UIFont.onestSemibold(size: 15)
+        titleLabel.textColor = UIColor(hex: "343333") ?? .label
+        titleLabel.textAlignment = .left
+        titleLabel.numberOfLines = 1
+        titleLabel.adjustsFontSizeToFitWidth = true
+        titleLabel.minimumScaleFactor = 0.8
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         containerView.addSubview(titleLabel)
-        
-        // Кнопка закрытия
+
+        // Кнопка закрытия (справа вверху)
         let closeButton = UIButton(type: .system)
         closeButton.setImage(UIImage(systemName: "xmark.circle.fill"), for: .normal)
         closeButton.tintColor = .systemGray
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         closeButton.addTarget(self, action: #selector(closeAlternativesPopup), for: .touchUpInside)
         containerView.addSubview(closeButton)
-        
-        // ScrollView для альтернатив
+
+        // ScrollView
         let scrollView = UIScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.showsVerticalScrollIndicator = true
         containerView.addSubview(scrollView)
-        
+
         let stackView = UIStackView()
         stackView.axis = .vertical
         stackView.spacing = 8
         stackView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.addSubview(stackView)
-        
+
         NSLayoutConstraint.activate([
             titleLabel.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 16),
-            titleLabel.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
-            
+            titleLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+            titleLabel.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -8),
+
             closeButton.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 12),
             closeButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -12),
             closeButton.widthAnchor.constraint(equalToConstant: 30),
             closeButton.heightAnchor.constraint(equalToConstant: 30),
-            
-            scrollView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 16),
+
+            scrollView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 12),
             scrollView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 12),
             scrollView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -12),
             scrollView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16),
-            
+
             stackView.topAnchor.constraint(equalTo: scrollView.topAnchor),
             stackView.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
             stackView.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
             stackView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
             stackView.widthAnchor.constraint(equalTo: scrollView.widthAnchor)
         ])
-        
-        // Добавляем карточки альтернатив
-        for alternative in alternatives {
-            let cardView = createAlternativeCard(product: alternative, originalItem: item)
-            stackView.addArrangedSubview(cardView)
+
+        // 1. Карточка оригинального товара (без кнопки)
+        if let original = originalCartItem {
+            let originalCard = createOriginalProductCard(cartItem: original)
+            stackView.addArrangedSubview(originalCard)
+            // Отступ 37pt между оригинальным товаром и подписью
+            stackView.setCustomSpacing(37, after: originalCard)
         }
-        
+
+        // 2. Подпись "Мы подобрали альтернативы"
+        let subLabel = UILabel()
+        subLabel.text = "Мы подобрали альтернативы"
+        subLabel.font = UIFont.onestSemibold(size: 17)
+        subLabel.textAlignment = .center
+        subLabel.textColor = UIColor(hex: "FF6C02") ?? .systemOrange
+        subLabel.translatesAutoresizingMaskIntoConstraints = false
+        stackView.addArrangedSubview(subLabel)
+
+        // Коллекция всех карточек для управления состоянием выбора
+        var allCardRefs: [(cardView: UIView, button: UIButton)] = []
+
+        // Функция переключения выбора между карточками
+        func updateSelection(selectedCardView: UIView, selectedButton: UIButton) {
+            for ref in allCardRefs {
+                if ref.cardView === selectedCardView {
+                    ref.cardView.layer.borderWidth = 0.8
+                    ref.cardView.layer.borderColor = UIColor(hex: "FF8733")?.cgColor
+                    ref.button.setTitle("Выбрано", for: .normal)
+                    ref.button.setTitleColor(UIColor(hex: "FF8733"), for: .normal)
+                    ref.button.backgroundColor = UIColor(hex: "FFE1CA")
+                    ref.button.layer.sublayers?.filter { $0 is CAGradientLayer }.forEach { $0.removeFromSuperlayer() }
+                } else {
+                    ref.cardView.layer.borderWidth = 0
+                    ref.cardView.layer.borderColor = UIColor.clear.cgColor
+                    ref.button.setTitle("Выбрать", for: .normal)
+                    ref.button.setTitleColor(.white, for: .normal)
+                    ref.button.backgroundColor = UIColor(hex: "FF8733")
+                    ref.button.layoutIfNeeded()
+                    self.applyGradientToButton(ref.button, cornerRadius: 8)
+                }
+            }
+        }
+
+        // 3. Авто-выбранная альтернатива (изначально выбрана)
+        let (autoCardView, autoButton) = createAlternativeCard(product: item.product, originalItem: item, isAutoSelected: true)
+        stackView.addArrangedSubview(autoCardView)
+        allCardRefs.append((cardView: autoCardView, button: autoButton))
+        autoButton.addAction(UIAction { [weak self] _ in
+            guard let self = self else { return }
+            updateSelection(selectedCardView: autoCardView, selectedButton: autoButton)
+            self.replaceProduct(item: item, with: item.product)
+        }, for: .touchUpInside)
+
+        // 4. Остальные альтернативы
+        for alternative in otherAlternatives {
+            let (cardView, button) = createAlternativeCard(product: alternative, originalItem: item, isAutoSelected: false)
+            stackView.addArrangedSubview(cardView)
+            allCardRefs.append((cardView: cardView, button: button))
+            let capturedAlternative = alternative
+            button.addAction(UIAction { [weak self] _ in
+                guard let self = self else { return }
+                updateSelection(selectedCardView: cardView, selectedButton: button)
+                self.replaceProduct(item: item, with: capturedAlternative)
+            }, for: .touchUpInside)
+        }
+
+        // Затемняем кнопку "заказать"
+        orderButton.isUserInteractionEnabled = false
+        orderButton.alpha = 0.5
+        view.bringSubviewToFront(dimView)
+        view.bringSubviewToFront(containerView)
+
         // Анимация появления
         containerView.transform = CGAffineTransform(translationX: 0, y: 300)
         dimView.alpha = 0
@@ -1397,97 +1514,162 @@ extension BasketView: UITableViewDataSource, UITableViewDelegate {
             containerView.transform = .identity
             dimView.alpha = 1
         }
-        
-        // Закрытие по тапу на фон
+
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(closeAlternativesPopup))
         dimView.addGestureRecognizer(tapGesture)
     }
-    
-    private func createAlternativeCard(product: ProductViewModel, originalItem: CartItem) -> UIView {
+
+    // Карточка оригинального товара (только для просмотра, без кнопки)
+    private func createOriginalProductCard(cartItem: CartItem) -> UIView {
         let cardView = UIView()
-        cardView.backgroundColor = .secondarySystemBackground
+        cardView.backgroundColor = UIColor(hex: "F3F3F6") ?? .secondarySystemBackground
         cardView.layer.cornerRadius = 12
+        cardView.layer.borderColor = UIColor(hex: "C9C8C8")?.cgColor
+        cardView.layer.borderWidth = 0.8
         cardView.translatesAutoresizingMaskIntoConstraints = false
-        
-        // Изображение
+
         let imageView = UIImageView()
         imageView.contentMode = .scaleAspectFit
         imageView.clipsToBounds = true
         imageView.layer.cornerRadius = 8
-        imageView.backgroundColor = .systemGray5
+        imageView.backgroundColor = UIColor(hex: "F3F3F6") ?? .systemGray5
         imageView.translatesAutoresizingMaskIntoConstraints = false
         cardView.addSubview(imageView)
-        
-        if let urlString = product.imageURL, let url = URL(string: urlString) {
+
+        if let urlString = cartItem.product.imageURL, let url = URL(string: urlString) {
             URLSession.shared.dataTask(with: url) { data, _, _ in
                 if let data = data, let image = UIImage(data: data) {
-                    DispatchQueue.main.async {
-                        imageView.image = image
-                    }
+                    DispatchQueue.main.async { imageView.image = image }
                 }
             }.resume()
         }
-        
-        // Название
+
         let nameLabel = UILabel()
-        nameLabel.text = product.name
-        nameLabel.font = UIFont.onestMedium(size: 14)
+        nameLabel.text = cartItem.product.name
+        nameLabel.font = UIFont.onestMedium(size: 12)
+        nameLabel.textColor = UIColor(hex: "454545") ?? .label
         nameLabel.numberOfLines = 2
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
         cardView.addSubview(nameLabel)
-        
-        // Цена
+
         let priceLabel = UILabel()
-        priceLabel.text = String(format: "%.0f ₽", product.price)
-        priceLabel.font = UIFont.onestBold(size: 16)
-        priceLabel.textColor = .systemGreen
+        priceLabel.text = String(format: "%.0f₽", cartItem.totalPrice)
+        priceLabel.font = UIFont.onestMedium(size: 14)
+        priceLabel.textColor = UIColor(hex: "5FAF2D") ?? .systemGreen
         priceLabel.translatesAutoresizingMaskIntoConstraints = false
         cardView.addSubview(priceLabel)
-        
-        // Кнопка выбора
-        let selectButton = UIButton(type: .system)
-        selectButton.setTitle("Выбрать", for: .normal)
-        selectButton.titleLabel?.font = UIFont.onestSemibold(size: 14)
-        selectButton.setTitleColor(.white, for: .normal)
-        selectButton.layer.cornerRadius = 8
-        selectButton.clipsToBounds = true
-        selectButton.translatesAutoresizingMaskIntoConstraints = false
-        cardView.addSubview(selectButton)
-        
-        // Сохраняем данные для замены
-        selectButton.accessibilityHint = product.name
-        selectButton.addAction(UIAction { [weak self] _ in
-            self?.closeAlternativesPopup()
-            self?.replaceProduct(item: originalItem, with: product)
-        }, for: .touchUpInside)
-        
+
         NSLayoutConstraint.activate([
             cardView.heightAnchor.constraint(equalToConstant: 90),
-            
+
             imageView.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 8),
             imageView.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
             imageView.widthAnchor.constraint(equalToConstant: 70),
             imageView.heightAnchor.constraint(equalToConstant: 70),
-            
+
+            nameLabel.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 12),
+            nameLabel.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
+            nameLabel.widthAnchor.constraint(equalToConstant: 128),
+            nameLabel.heightAnchor.constraint(equalToConstant: 34),
+
+            // Цена отступает от левого края \"таблички\" (nameLabel) на 28pt
+            priceLabel.leadingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -60),
+            priceLabel.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
+            priceLabel.trailingAnchor.constraint(lessThanOrEqualTo: cardView.trailingAnchor, constant: -12)
+        ])
+
+        return cardView
+    }
+    
+    // Возвращает (cardView, button) — action на кнопку устанавливается снаружи
+    private func createAlternativeCard(product: ProductViewModel, originalItem: CartItem, isAutoSelected: Bool) -> (UIView, UIButton) {
+        let cardView = UIView()
+        cardView.backgroundColor = UIColor(hex: "F3F3F6") ?? .secondarySystemBackground
+        cardView.layer.cornerRadius = 12
+        cardView.translatesAutoresizingMaskIntoConstraints = false
+
+        if isAutoSelected {
+            cardView.layer.borderColor = UIColor(hex: "FF8733")?.cgColor
+            cardView.layer.borderWidth = 0.8
+        }
+
+        let imageView = UIImageView()
+        imageView.contentMode = .scaleAspectFit
+        imageView.clipsToBounds = true
+        imageView.layer.cornerRadius = 8
+        imageView.backgroundColor = UIColor(hex: "F3F3F6") ?? .systemGray5
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        cardView.addSubview(imageView)
+
+        if let urlString = product.imageURL, let url = URL(string: urlString) {
+            URLSession.shared.dataTask(with: url) { data, _, _ in
+                if let data = data, let image = UIImage(data: data) {
+                    DispatchQueue.main.async { imageView.image = image }
+                }
+            }.resume()
+        }
+
+        let nameLabel = UILabel()
+        nameLabel.text = product.name
+        nameLabel.font = UIFont.onestMedium(size: 12)
+        nameLabel.textColor = UIColor(hex: "454545") ?? .label
+        nameLabel.numberOfLines = 2
+        nameLabel.translatesAutoresizingMaskIntoConstraints = false
+        cardView.addSubview(nameLabel)
+
+        let priceLabel = UILabel()
+        priceLabel.text = String(format: "%.0f₽", product.price)
+        priceLabel.font = UIFont.onestMedium(size: 14)
+        priceLabel.textColor = UIColor(hex: "5FAF2D") ?? .systemGreen
+        priceLabel.translatesAutoresizingMaskIntoConstraints = false
+        cardView.addSubview(priceLabel)
+
+        // Единая кнопка для обоих состояний — стиль зависит от isAutoSelected
+        let actionButton = UIButton(type: .system)
+        actionButton.titleLabel?.font = UIFont.onestSemibold(size: 14)
+        actionButton.layer.cornerRadius = 8
+        actionButton.clipsToBounds = true
+        actionButton.translatesAutoresizingMaskIntoConstraints = false
+        cardView.addSubview(actionButton)
+
+        if isAutoSelected {
+            actionButton.setTitle("Выбрано", for: .normal)
+            actionButton.setTitleColor(UIColor(hex: "FF8733"), for: .normal)
+            actionButton.backgroundColor = UIColor(hex: "FFE1CA")
+        } else {
+            actionButton.setTitle("Выбрать", for: .normal)
+            actionButton.setTitleColor(.white, for: .normal)
+            actionButton.backgroundColor = UIColor(hex: "FF8733")
+            DispatchQueue.main.async { [weak self, weak actionButton] in
+                guard let self = self, let button = actionButton else { return }
+                button.layoutIfNeeded()
+                self.applyGradientToButton(button, cornerRadius: 8)
+            }
+        }
+
+        NSLayoutConstraint.activate([
+            cardView.heightAnchor.constraint(equalToConstant: 90),
+
+            imageView.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 8),
+            imageView.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
+            imageView.widthAnchor.constraint(equalToConstant: 70),
+            imageView.heightAnchor.constraint(equalToConstant: 70),
+
             nameLabel.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 12),
             nameLabel.topAnchor.constraint(equalTo: cardView.topAnchor, constant: 12),
-            nameLabel.trailingAnchor.constraint(equalTo: selectButton.leadingAnchor, constant: -8),
-            
+            nameLabel.widthAnchor.constraint(equalToConstant: 128),
+            nameLabel.heightAnchor.constraint(equalToConstant: 34),
+
             priceLabel.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 12),
-            priceLabel.bottomAnchor.constraint(equalTo: cardView.bottomAnchor, constant: -12),
-            
-            selectButton.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -12),
-            selectButton.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
-            selectButton.widthAnchor.constraint(equalToConstant: 80),
-            selectButton.heightAnchor.constraint(equalToConstant: 36)
+            priceLabel.bottomAnchor.constraint(equalTo: cardView.bottomAnchor, constant: -20),
+
+            actionButton.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -12),
+            actionButton.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
+            actionButton.widthAnchor.constraint(equalToConstant: 80),
+            actionButton.heightAnchor.constraint(equalToConstant: 36)
         ])
-        
-        // Применяем градиент после установки constraints
-        DispatchQueue.main.async { [weak self] in
-            self?.applyGradientToButton(selectButton, cornerRadius: 8)
-        }
-        
-        return cardView
+
+        return (cardView, actionButton)
     }
     
     @objc private func closeAlternativesPopup() {
@@ -1501,6 +1683,12 @@ extension BasketView: UITableViewDataSource, UITableViewDelegate {
                 containerView.removeFromSuperview()
             }
         }
+        
+        // Возвращаем кнопку "заказать" в активное состояние
+        isAlternativesPresented = false
+        orderButton.isUserInteractionEnabled = true
+        orderButton.alpha = 1.0
+        view.bringSubviewToFront(orderButton)
     }
     
     private func replaceProduct(item: CartItem, with newProduct: ProductViewModel) {
@@ -1799,7 +1987,8 @@ final class BasketItemCell: UITableViewCell {
         let productName = item.product.name
         
         titleLabel.text = productName
-        priceLabel.text = String(format: "%.2f₽", item.product.price)
+        // Показываем общую цену (цена * количество)
+        priceLabel.text = String(format: "%.0f₽", item.totalPrice)
         quantityLabel.text = "\(item.quantity)"
         
         // Показываем/скрываем кнопку альтернатив

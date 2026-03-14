@@ -66,96 +66,24 @@ class MainView: UIViewController {
             }
         }
         
-        // Применяем mixed corner radius к карточкам магазинов
+        // Применяем закругление к карточкам магазинов
         applyCornerRadiusToStoreCells()
         
         // Обновляем frame градиента на кнопке корзины
         if let basketButton = basketButton {
+            // Убеждаемся, что кнопка корзины всегда поверх всех элементов
+            view.bringSubviewToFront(basketButton)
+            
             if let gradientLayer = basketButton.layer.sublayers?.first(where: { $0 is CAGradientLayer }) as? CAGradientLayer {
                 gradientLayer.frame = basketButton.bounds
             }
         }
     }
     
-    /// Применяет mixed corner radius к одной карточке
+    /// Применяет corner radius к одной карточке
     private func applyCornerRadiusToCell(_ cell: UIView) {
-        guard cell.bounds.width > 0 && cell.bounds.height > 0 else { return }
-        
-        // Используем bounds для правильной работы с координатами
-        let bounds = cell.bounds
-        let topLeft: CGFloat = 8
-        let topRight: CGFloat = 20
-        let bottomLeft: CGFloat = 8
-        let bottomRight: CGFloat = 20
-        
-        let width = bounds.width
-        let height = bounds.height
-        
-        // Создаем path с правильными углами
-        let path = UIBezierPath()
-        
-        // Начинаем с точки на верхней грани (после левого верхнего скругления)
-        path.move(to: CGPoint(x: topLeft, y: 0))
-        
-        // Верхняя грань до правого верхнего угла
-        path.addLine(to: CGPoint(x: width - topRight, y: 0))
-        
-        // Правый верхний угол (20px) - дуга от (width - topRight, 0) до (width, topRight)
-        path.addArc(
-            withCenter: CGPoint(x: width - topRight, y: topRight),
-            radius: topRight,
-            startAngle: -CGFloat.pi / 2,  // -90 градусов (вверх)
-            endAngle: 0,                   // 0 градусов (вправо)
-            clockwise: true
-        )
-        
-        // Правая грань до правого нижнего угла
-        path.addLine(to: CGPoint(x: width, y: height - bottomRight))
-        
-        // Правый нижний угол (20px) - дуга от (width, height - bottomRight) до (width - bottomRight, height)
-        path.addArc(
-            withCenter: CGPoint(x: width - bottomRight, y: height - bottomRight),
-            radius: bottomRight,
-            startAngle: 0,                 // 0 градусов (вправо)
-            endAngle: CGFloat.pi / 2,      // 90 градусов (вниз)
-            clockwise: true
-        )
-        
-        // Нижняя грань до левого нижнего угла
-        path.addLine(to: CGPoint(x: bottomLeft, y: height))
-        
-        // Левый нижний угол (8px) - дуга от (bottomLeft, height) до (0, height - bottomLeft)
-        path.addArc(
-            withCenter: CGPoint(x: bottomLeft, y: height - bottomLeft),
-            radius: bottomLeft,
-            startAngle: CGFloat.pi / 2,    // 90 градусов (вниз)
-            endAngle: CGFloat.pi,          // 180 градусов (влево)
-            clockwise: true
-        )
-        
-        // Левая грань до левого верхнего угла
-        path.addLine(to: CGPoint(x: 0, y: topLeft))
-        
-        // Левый верхний угол (8px) - дуга от (0, topLeft) до (topLeft, 0)
-        path.addArc(
-            withCenter: CGPoint(x: topLeft, y: topLeft),
-            radius: topLeft,
-            startAngle: CGFloat.pi,        // 180 градусов (влево)
-            endAngle: -CGFloat.pi / 2,      // -90 градусов (вверх)
-            clockwise: true
-        )
-        
-        path.close()
-        
-        // Убираем старую маску, если есть
-        cell.layer.mask = nil
-        
-        // Применяем маску - frame должен быть в координатах layer (bounds)
-        let maskLayer = CAShapeLayer()
-        maskLayer.frame = bounds  // bounds уже в правильных координатах (origin: .zero)
-        maskLayer.path = path.cgPath
-        cell.layer.mask = maskLayer
-        cell.layer.masksToBounds = true
+        // Ничего не делаем - закругление применяется к backgroundView внутри ячейки
+        // Контейнер остается без обрезки, чтобы текст не обрезался
     }
     
     /// Применяет mixed corner radius ко всем карточкам магазинов
@@ -173,10 +101,12 @@ class MainView: UIViewController {
             return cells
         }
         
+        // Сначала делаем layout для всего contentView
+        contentView.layoutIfNeeded()
+        
         let cells = findStoreCells(in: contentView)
         for cell in cells {
-            // Убеждаемся, что view имеет правильные размеры
-            cell.layoutIfNeeded()
+            // Применяем маску только если размеры больше 0
             if cell.bounds.width > 0 && cell.bounds.height > 0 {
                 applyCornerRadiusToCell(cell)
             }
@@ -295,11 +225,14 @@ class MainView: UIViewController {
         view.addSubview(basketButton)
         
         NSLayoutConstraint.activate([
-            basketButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 77),
+            basketButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             basketButton.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -34),
             basketButton.widthAnchor.constraint(equalToConstant: 242),
             basketButton.heightAnchor.constraint(equalToConstant: 53)
         ])
+        
+        // Убеждаемся, что кнопка корзины всегда поверх всех элементов (включая scrollView)
+        view.bringSubviewToFront(basketButton)
         
         // Добавляем действие при нажатии
         basketButton.addTarget(self, action: #selector(basketButtonTapped), for: .touchUpInside)
@@ -390,7 +323,7 @@ class MainView: UIViewController {
         titleLabel.textColor = .black
         view.addSubview(titleLabel)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.topAnchor.constraint(equalTo: view.topAnchor, constant: 63).isActive = true
+        titleLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 4).isActive = true
         titleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 21).isActive = true
         
         // Кнопка меню в правом верхнем углу
@@ -401,7 +334,7 @@ class MainView: UIViewController {
         view.addSubview(menuButton)
         NSLayoutConstraint.activate([
             menuButton.topAnchor.constraint(equalTo: titleLabel.topAnchor),
-            menuButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 328.5),
+            menuButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
             menuButton.widthAnchor.constraint(equalToConstant: DesignTokens.Sizes.Button.height),
             menuButton.heightAnchor.constraint(equalToConstant: DesignTokens.Sizes.Button.height)
         ])
@@ -429,9 +362,15 @@ class MainView: UIViewController {
         scrollView.pinTop(to: searchBar.bottomAnchor, 15)
         scrollView.pinLeft(to: view)
         scrollView.pinRight(to: view)
-        // Отступ снизу для кнопки корзины (53 высота + 34 отступ + небольшой зазор)
-        scrollView.pinBottom(to: view.safeAreaLayoutGuide.bottomAnchor, -100)
+        // ScrollView идет до самого низа экрана
+        scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor).isActive = true
         scrollView.alwaysBounceVertical = true
+        scrollView.showsVerticalScrollIndicator = true
+        
+        // Добавляем contentInset снизу, чтобы контент не закрывался кнопкой корзины
+        // (высота кнопки 53 + отступ от низа 34 + зазор 10 = 97)
+        scrollView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: 97, right: 0)
+        scrollView.scrollIndicatorInsets = UIEdgeInsets(top: 0, left: 0, bottom: 97, right: 0)
 
         scrollView.addSubview(contentView)
         contentView.translatesAutoresizingMaskIntoConstraints = false
@@ -485,7 +424,7 @@ class MainView: UIViewController {
             }
         }
 
-        // Content bottom
+        // Content bottom - небольшой отступ снизу (contentInset scrollView позаботится о видимости)
         if let lastBottom = previousRowBottom {
             contentView.pinBottom(to: lastBottom, DesignTokens.Spacing.lg)
         }
@@ -493,16 +432,26 @@ class MainView: UIViewController {
 
     private func makeCell(imageName: String, storeName: String) -> UIView {
         let container = UIView()
-        container.backgroundColor = .white
-        // НЕ применяем обычный cornerRadius - используем только маску
-        container.layer.masksToBounds = true
+        container.backgroundColor = .clear // Прозрачный фон для контейнера
         container.isUserInteractionEnabled = true
         container.tag = 999 // Маркер для применения маски
+        
+        // Создаем подложку с белым фоном и закруглением
+        let backgroundView = UIView()
+        backgroundView.backgroundColor = .white
+        backgroundView.layer.cornerRadius = 20
+        backgroundView.layer.cornerCurve = .continuous
+        backgroundView.layer.masksToBounds = true
+        backgroundView.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(backgroundView)
+        container.sendSubviewToBack(backgroundView)
         
         // Цветной прямоугольник для логотипа
         let coloredView = UIView()
         coloredView.backgroundColor = getShopColor(for: storeName)
         coloredView.layer.cornerRadius = DesignTokens.Sizes.StoreCell.logoCornerRadius
+        coloredView.layer.masksToBounds = true // Обрезаем содержимое по границам
+        coloredView.clipsToBounds = true // Дополнительная гарантия
         coloredView.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(coloredView)
         
@@ -549,6 +498,12 @@ class MainView: UIViewController {
         label.translatesAutoresizingMaskIntoConstraints = false
         
         NSLayoutConstraint.activate([
+            // Белая подложка с закруглением - заполняет карточку от верха до низа coloredView
+            backgroundView.topAnchor.constraint(equalTo: container.topAnchor),
+            backgroundView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            backgroundView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            backgroundView.bottomAnchor.constraint(equalTo: coloredView.bottomAnchor, constant: 4),
+            
             // Цветной прямоугольник (сильно уменьшенная ширина - квадратный)
             coloredView.topAnchor.constraint(equalTo: container.topAnchor, constant: DesignTokens.Spacing.sm),
             coloredView.centerXAnchor.constraint(equalTo: container.centerXAnchor),
@@ -820,11 +775,10 @@ class MainView: UIViewController {
         view.addSubview(searchBar)
         searchBar.translatesAutoresizingMaskIntoConstraints = false
         searchBar.pinTop(to: addressLabel.bottomAnchor, DesignTokens.Spacing.searchBarTop)
-        // Центрируем searchBar и задаем точные размеры 347x40
-        searchBar.centerXAnchor.constraint(equalTo: view.centerXAnchor).isActive = true
-        // Задаем точные размеры 347x40
+        // Растягиваем searchBar с отступами от краев экрана
         NSLayoutConstraint.activate([
-            searchBar.widthAnchor.constraint(equalToConstant: 347),
+            searchBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 23),
+            searchBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -23),
             searchBar.heightAnchor.constraint(equalToConstant: 40)
         ])
         // Делаем сам searchBar прозрачным, чтобы был виден только textField

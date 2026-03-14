@@ -38,9 +38,11 @@ class ShopPresenter: ShopPresenterProtocol {
         self.shopName = shopName
     }
     
+    private static let dairyCategoryName = "Молочная продукция"
+    
     func viewDidLoad() {
         interactor?.viewDidLoad()
-        interactor?.fetchProducts(shopName: shopName, query: nil, category: nil)
+        interactor?.fetchCategoryProducts(category: ShopPresenter.dairyCategoryName)
         view?.setShopHeader(for: shopName)
     }
     
@@ -48,42 +50,43 @@ class ShopPresenter: ShopPresenterProtocol {
         currentCategory = category
         view?.displaySelectedCategory(category)
         
-        // Очищаем текущие товары перед загрузкой новой категории
         allProducts = []
         view?.displayProducts([], append: false)
         
-        // Получаем название категории из маппинга для API
-        // Если категория "Все", отправляем nil, иначе используем точное название из маппинга
-        let categoryToFetch: String?
         if category == "Все" {
-            categoryToFetch = nil
+            interactor?.fetchCategoryProducts(category: ShopPresenter.dairyCategoryName)
         } else {
-            categoryToFetch = categoryMapping[category] ?? category
+            interactor?.fetchSubcategoryProducts(shopName: shopName, subcategory: category)
         }
-        
-        // Загружаем продукты с сервера для выбранной категории
-        interactor?.fetchProducts(shopName: shopName, query: nil, category: categoryToFetch)
     }
     
     func presentShopScreen() {
         view?.displayShopScreen()
     }
     
-    // Маппинг коротких названий на реальные категории из БД
-    // Названия категорий в БД: "Овощи, фрукты", "Молочная продукция", "Хлеб и выпечка", "Мясо и птица", "Сладости", "Вода и напитки"
-    private let categoryMapping: [String: String] = [
-        "Все": "Все",
-        "Фрукты": "Овощи, фрукты",
-        "Овощи": "Овощи, фрукты",
-        "Мясо": "Мясо и птица",
-        "Молочка": "Молочная продукция",
-        "Хлеб": "Хлеб и выпечка",
-        "Напитки": "Вода и напитки",
-        "Сладости": "Сладости"
+    // Порядок отображения подкатегорий в scrollView
+    // Эти значения приходят с бэка в поле subcategory
+    private let subcategoriesOrder: [String] = [
+        "Молоко",
+        "Растительные напитки",
+        "Кисломолочные напитки",
+        "Молочные коктейли и напитки",
+        "Йогурты",
+        "Творог и творожные продукты",
+        "Молочные десерты",
+        "Сметана",
+        "Сливки",
+        "Масло",
+        "Сыры",
+        "Сгущёнка и молочные консервы",
+        "Детская молочная продукция",
+        "Мороженое",
+        "Закваски"
     ]
     
     func presentCategories() {
-        let categories = ["Все", "Фрукты", "Овощи", "Мясо", "Молочка", "Хлеб", "Напитки", "Сладости"]
+        // В scrollView теперь отображаем подкатегории (subcategory), плюс пункт "Все"
+        let categories = ["Все"] + subcategoriesOrder
         view?.displayCategories(categories)
     }
     
@@ -111,7 +114,9 @@ class ShopPresenter: ShopPresenterProtocol {
                 }
                 
                 let vms: [ProductViewModel] = products.compactMap { dict in
-                    guard let name = dict["name"] as? String else { return nil }
+                    // Поддерживаем оба формата: name/title, id/offer_id
+                    let name = dict["name"] as? String ?? dict["title"] as? String
+                    guard let productName = name else { return nil }
                     
                     var price: Double = 0
                     if let priceNum = dict["price"] as? NSNumber {
@@ -122,84 +127,45 @@ class ShopPresenter: ShopPresenterProtocol {
                         price = parsedPrice
                     }
                     
-                    let category = dict["category"] as? String
+                    let category = dict["category"] as? String ?? dict["category_name"] as? String
+                    let subcategory = dict["subcategory"] as? String
                     let images = dict["images"] as? [String]
                     let imageURL = images?.first
-                    let offerId = dict["id"] as? Int
+                    let offerId = dict["id"] as? Int ?? dict["offer_id"] as? Int
                     
                     return ProductViewModel(
-                        name: name,
+                        name: productName,
                         price: price,
                         imageURL: imageURL,
                         description: dict["description"] as? String,
                         category: category,
+                        subcategory: subcategory,
                         offerId: offerId
                     )
                 }
                 
-                // Еще раз проверяем актуальность категории
                 guard self.currentCategory == expectedCategory else {
-                    print("⚠️ Category changed after parsing, ignoring products")
-                    DispatchQueue.main.async {
-                        self.view?.hideLoadingIndicator()
-                    }
+                    DispatchQueue.main.async { self.view?.hideLoadingIndicator() }
                     return
                 }
                 
-                // Сохраняем товары
                 self.allProducts = vms
+                print("📦 Loaded \(vms.count) products for '\(self.currentCategory)'")
                 
-                // Фильтруем по категории
-                let filteredProducts: [ProductViewModel]
-                if self.currentCategory == "Все" {
-                    filteredProducts = vms
-                } else {
-                    let apiCategory = self.categoryMapping[self.currentCategory] ?? self.currentCategory
-                    print("🔍 Filtering products for category '\(self.currentCategory)' (API category: '\(apiCategory)')")
-                    print("📦 Total products before filter: \(vms.count)")
-                    
-                    // Логируем категории всех товаров для отладки
-                    let categoryCounts = Dictionary(grouping: vms, by: { $0.category ?? "nil" })
-                    print("📊 Products by category:")
-                    for (cat, products) in categoryCounts {
-                        print("   \(cat ?? "nil"): \(products.count) products")
-                    }
-                    
-                    filteredProducts = vms.filter { product in
-                        let matches = product.category == apiCategory
-                        if !matches && product.category != nil {
-                            print("   ❌ Product '\(product.name)' has category '\(product.category ?? "nil")', expected '\(apiCategory)'")
-                        }
-                        return matches
-                    }
-                    print("✅ Filtered to \(filteredProducts.count) products")
-                }
-                
-                // Финальная проверка перед отображением
-                guard self.currentCategory == expectedCategory else {
-                    print("⚠️ Category changed before display, ignoring products")
-                    DispatchQueue.main.async {
-                        self.view?.hideLoadingIndicator()
-                    }
-                    return
-                }
-                
-                // Показываем на главном потоке
                 DispatchQueue.main.async {
-                    // Последняя проверка перед отображением
                     guard self.currentCategory == expectedCategory else {
                         self.view?.hideLoadingIndicator()
                         return
                     }
-                    self.view?.displayProducts(filteredProducts, append: false)
-                    // Скрываем индикатор загрузки после отображения товаров
+                    self.view?.displayProducts(vms, append: false)
                     self.view?.hideLoadingIndicator()
                 }
             }
         } else {
             // Для последующих страниц парсим синхронно (уже на фоне)
             let vms: [ProductViewModel] = products.compactMap { dict in
-                guard let name = dict["name"] as? String else { return nil }
+                let name = dict["name"] as? String ?? dict["title"] as? String
+                guard let productName = name else { return nil }
                 
                 var price: Double = 0
                 if let priceNum = dict["price"] as? NSNumber {
@@ -210,24 +176,24 @@ class ShopPresenter: ShopPresenterProtocol {
                     price = parsedPrice
                 }
                 
-                let category = dict["category"] as? String
+                let category = dict["category"] as? String ?? dict["category_name"] as? String
+                let subcategory = dict["subcategory"] as? String
                 let images = dict["images"] as? [String]
                 let imageURL = images?.first
-                let offerId = dict["id"] as? Int
+                let offerId = dict["id"] as? Int ?? dict["offer_id"] as? Int
                 
                 return ProductViewModel(
-                    name: name,
+                    name: productName,
                     price: price,
                     imageURL: imageURL,
                     description: dict["description"] as? String,
                     category: category,
+                    subcategory: subcategory,
                     offerId: offerId
                 )
             }
             
             allProducts.append(contentsOf: vms)
-            
-            // Для append не фильтруем - товары уже должны быть отфильтрованы API
             view?.displayProducts(vms, append: true)
         }
     }
@@ -249,18 +215,6 @@ class ShopPresenter: ShopPresenterProtocol {
         view?.hideLoadingIndicator()
         // Можно показать ошибку пользователю, если нужно
         print("❌ Failed to load products: \(error)")
-    }
-    
-    private func applyFilter() {
-        let filtered: [ProductViewModel]
-        if currentCategory == "Все" {
-            filtered = allProducts
-        } else {
-            let apiCategory = categoryMapping[currentCategory] ?? currentCategory
-            filtered = allProducts.filter { $0.category == apiCategory }
-        }
-        print("🛍️ ShopPresenter: Filtered to \(filtered.count) products for category '\(currentCategory)'")
-        view?.displayProducts(filtered, append: false)
     }
     
     func searchTextChanged(_ text: String) {

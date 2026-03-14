@@ -5,6 +5,8 @@ protocol ShopInteractorProtocol: AnyObject {
     func viewDidLoad()
     func categorySelected(_ category: String)
     func fetchProducts(shopName: String, query: String?, category: String?)
+    func fetchCategoryProducts(category: String)
+    func fetchSubcategoryProducts(shopName: String, subcategory: String)
     func loadMoreProducts()
     func cancelCurrentRequest()
     var hasMoreProducts: Bool { get }
@@ -32,10 +34,16 @@ class ShopInteractor: ShopInteractorProtocol {
     
     // Пагинация
     private var currentPage: Int = 1
-    private let firstPageSize: Int = 6 // Первая страница - минимум товаров для мгновенной загрузки
-    private let pageSize: Int = 20 // Последующие страницы - больше товаров
+    private let firstPageSize: Int = 6
+    private let pageSize: Int = 20
     private var hasMore: Bool = true
     var isLoading: Bool = false
+    
+    // Пагинация для новых эндпоинтов (offset-based)
+    private var currentOffset: Int = 0
+    private let offsetPageSize: Int = 50
+    private enum FetchMode { case legacy, category, subcategory }
+    private var currentFetchMode: FetchMode = .legacy
     
     // Очередь для парсинга данных
     private let parsingQueue = DispatchQueue(label: "com.korzina.parsing", qos: .userInitiated)
@@ -60,10 +68,12 @@ class ShopInteractor: ShopInteractorProtocol {
     }
     
     func fetchProducts(shopName: String, query: String?, category: String?) {
-        // Отменяем предыдущий запрос, если он еще выполняется
         currentTask?.cancel()
+        currentTask = nil
+        isLoading = false
         
-        // Сбрасываем пагинацию при новой категории/поиске
+        currentFetchMode = .legacy
+        
         let isNewSearch = currentShopName != shopName || currentCategory != category || currentQuery != query
         if isNewSearch {
             currentPage = 1
@@ -74,15 +84,23 @@ class ShopInteractor: ShopInteractorProtocol {
         currentCategory = category
         currentQuery = query
         
-        // Загружаем первую страницу с меньшим количеством товаров для быстрой загрузки
         fetchProductsPage(page: 1, shopName: shopName, query: query, category: category, append: false, isFirstPage: true)
     }
     
     func loadMoreProducts() {
         guard hasMore && !isLoading else { return }
         
-        currentPage += 1
-        fetchProductsPage(page: currentPage, shopName: currentShopName, query: currentQuery, category: currentCategory, append: true, isFirstPage: false)
+        switch currentFetchMode {
+        case .legacy:
+            currentPage += 1
+            fetchProductsPage(page: currentPage, shopName: currentShopName, query: currentQuery, category: currentCategory, append: true, isFirstPage: false)
+        case .category:
+            currentOffset += offsetPageSize
+            fetchOffsetPage(pathPrefix: "/api/category/", name: currentCategory ?? "", offset: currentOffset, append: true)
+        case .subcategory:
+            currentOffset += offsetPageSize
+            fetchOffsetPage(pathPrefix: "/api/subcategory/", name: currentCategory ?? "", offset: currentOffset, append: true)
+        }
     }
     
     private func fetchProductsPage(page: Int, shopName: String, query: String?, category: String?, append: Bool, isFirstPage: Bool) {
@@ -125,10 +143,8 @@ class ShopInteractor: ShopInteractorProtocol {
         ]
         if let q = query, !q.isEmpty { items.append(URLQueryItem(name: "q", value: q)) }
         if let cat = category, !cat.isEmpty {
-            // URLQueryItem автоматически кодирует значения, но убеждаемся, что категория правильно передается
             items.append(URLQueryItem(name: "category", value: cat))
             print("🔍 ShopInteractor: Fetching products with category filter: '\(cat)'")
-            print("   Encoded category in URL will be: \(cat.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? cat)")
         } else {
             print("🔍 ShopInteractor: Fetching products without category filter")
         }
@@ -293,6 +309,7 @@ class ShopInteractor: ShopInteractorProtocol {
                             price = priceDouble
                         }
                         let category = dict["category"] as? String ?? dict["category_name"] as? String
+                        let subcategory = dict["subcategory"] as? String
                         let images = dict["images"] as? [String]
                         let imageURL = images?.first
                         
@@ -306,6 +323,7 @@ class ShopInteractor: ShopInteractorProtocol {
                             imageURL: imageURL,
                             description: dict["description"] as? String,
                             category: category,
+                            subcategory: subcategory,
                             offerId: dict["id"] as? Int
                         )
                     }
@@ -322,6 +340,121 @@ class ShopInteractor: ShopInteractorProtocol {
                             self.presenter?.didFinishLoading()
                         }
                     }
+                }
+            }
+        }
+        currentTask = task
+        task.resume()
+    }
+    
+    /// Загружает товары по категории через /api/category/{category_name}/offers
+    func fetchCategoryProducts(category: String) {
+        currentTask?.cancel()
+        currentTask = nil
+        isLoading = false
+        
+        currentOffset = 0
+        hasMore = true
+        currentFetchMode = .category
+        currentCategory = category
+        currentQuery = nil
+        
+        fetchOffsetPage(pathPrefix: "/api/category/", name: category, offset: 0, append: false)
+    }
+    
+    /// Загружает товары по подкатегории через /api/subcategory/{category_name}/offers
+    func fetchSubcategoryProducts(shopName: String, subcategory: String) {
+        currentTask?.cancel()
+        currentTask = nil
+        isLoading = false
+        
+        currentOffset = 0
+        hasMore = true
+        currentFetchMode = .subcategory
+        currentShopName = shopName
+        currentCategory = subcategory
+        currentQuery = nil
+        
+        fetchOffsetPage(pathPrefix: "/api/subcategory/", name: subcategory, offset: 0, append: false)
+    }
+    
+    /// Универсальный метод для offset-based эндпоинтов (/api/category/ и /api/subcategory/)
+    private func fetchOffsetPage(pathPrefix: String, name: String, offset: Int, append: Bool) {
+        guard !isLoading else { return }
+        isLoading = true
+        
+        if !append {
+            DispatchQueue.main.async { self.presenter?.willStartLoading() }
+        }
+        
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        let path = "\(pathPrefix)\(encodedName)/offers"
+        
+        guard var components = URLComponents(string: baseURLString + path) else {
+            isLoading = false
+            DispatchQueue.main.async { self.presenter?.didFailLoading(error: "Invalid URL") }
+            return
+        }
+        components.queryItems = [
+            URLQueryItem(name: "limit", value: String(offsetPageSize)),
+            URLQueryItem(name: "offset", value: String(offset))
+        ]
+        
+        guard let url = components.url else {
+            isLoading = false
+            DispatchQueue.main.async { self.presenter?.didFailLoading(error: "Invalid URL") }
+            return
+        }
+        
+        print("🔍 Fetching \(pathPrefix) '\(name)' offset=\(offset): \(url.absoluteString)")
+        
+        let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+        let expectedCategory = self.currentCategory
+        
+        let task = session.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
+            defer { self.isLoading = false }
+            
+            if let error = error as NSError?, error.code == NSURLErrorCancelled { return }
+            
+            guard self.currentCategory == expectedCategory else {
+                DispatchQueue.main.async { self.presenter?.didFinishLoading() }
+                return
+            }
+            
+            if let error = error {
+                print("❌ Fetch error: \(error)")
+                DispatchQueue.main.async { self.presenter?.didFailLoading(error: error.localizedDescription) }
+                return
+            }
+            
+            guard let data = data else {
+                DispatchQueue.main.async { self.presenter?.didFailLoading(error: "No data") }
+                return
+            }
+            
+            self.parsingQueue.async {
+                guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    DispatchQueue.main.async { self.presenter?.didFailLoading(error: "Parse error") }
+                    return
+                }
+                
+                var offersArray: [[String: Any]] = []
+                if let offers = json["offers"] as? [[String: Any]] {
+                    offersArray = offers
+                } else if let products = json["products"] as? [[String: Any]] {
+                    offersArray = products
+                }
+                
+                self.hasMore = offersArray.count >= self.offsetPageSize
+                print("📦 '\(name)' offset=\(offset): received \(offersArray.count) offers, hasMore=\(self.hasMore)")
+                
+                DispatchQueue.main.async {
+                    guard self.currentCategory == expectedCategory else {
+                        self.presenter?.didFinishLoading()
+                        return
+                    }
+                    self.presenter?.didLoadProducts(offersArray, append: append)
                 }
             }
         }

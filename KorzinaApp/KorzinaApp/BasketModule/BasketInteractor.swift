@@ -125,6 +125,7 @@ class BasketInteractor: BasketInteractorProtocol {
                                 
                                 // Находим количество из текущей корзины
                                 var quantity = 1
+                                
                                 if let matchingItem = currentCartItems.first(where: { 
                                     $0.product.name.lowercased() == targetTitle.lowercased() ||
                                     $0.product.name.lowercased().contains(targetTitle.lowercased()) || 
@@ -148,35 +149,32 @@ class BasketInteractor: BasketInteractorProtocol {
                                     imageURL: imageURL,
                                     description: matchedOffer["description"] as? String,
                                     category: matchedOffer["category_name"] as? String,
+                                    subcategory: matchedOffer["subcategory"] as? String,
                                     offerId: matchedOffer["offer_id"] as? Int
                                 )
-                                
-                                // Получаем is_identical из ответа API /api/all_alternatives
-                                // Сначала проверяем прямое поле is_identical в match
-                                var isIdentical = false
                                 
                                 let matchType = match["match_type"] as? String ?? ""
                                 let similarity = match["similarity"] as? Double ?? 0.0
                                 let matchedOfferId = matchedOffer["offer_id"] as? Int
                                 let targetOfferId = match["target_offer_id"] as? Int
                                 
-                                if let isIdenticalValue = match["is_identical"] as? Bool {
-                                    isIdentical = isIdenticalValue
-                                    print("   ✅ is_identical from API: \(isIdentical)")
-                                } else if let isIdenticalValue = match["isIdentical"] as? Bool {
-                                    isIdentical = isIdenticalValue
-                                    print("   ✅ isIdentical from API: \(isIdentical)")
-                                } else {
-                                    // Fallback: определяем на основе match_type и similarity
-                                    if let matchedId = matchedOfferId, let targetId = targetOfferId, matchedId == targetId {
-                                        // Если offer_id совпадает, это точно тот же товар
-                                        isIdentical = true
-                                    } else if matchType.contains("full") && similarity >= 1.0 {
-                                        // Если match_type содержит "full" и similarity = 1, товар идентичен
-                                        isIdentical = true
+                                // Определяем is_identical с дополнительной проверкой названий,
+                                // т.к. API иногда ошибочно помечает разные товары как идентичные
+                                var isIdentical = false
+                                
+                                let namesMatch = productName.lowercased() == targetTitle.lowercased()
+                                
+                                if let matchedId = matchedOfferId, let targetId = targetOfferId, matchedId == targetId {
+                                    isIdentical = true
+                                } else if namesMatch && matchType == "exact_full" && similarity >= 1.0 {
+                                    isIdentical = true
+                                } else if namesMatch {
+                                    if let apiFlag = match["is_identical"] as? Bool ?? match["isIdentical"] as? Bool {
+                                        isIdentical = apiFlag
                                     }
-                                    print("   ⚠️ is_identical not in API response, calculated: \(isIdentical)")
                                 }
+                                
+                                print("   ✅ is_identical: \(isIdentical) (namesMatch=\(namesMatch), matchType=\(matchType), sim=\(similarity))")
                                 
                                 // Логируем информацию о товаре и флаге is_identical для корзины другого магазина
                                 print("🛒 BasketInteractor: Adding offer to alternative shop cart (\(shopName)):")
@@ -316,6 +314,7 @@ class BasketInteractor: BasketInteractorProtocol {
                                 imageURL: productData["image"] as? String,
                                 description: productData["description"] as? String,
                                 category: productData["category"] as? String,
+                                subcategory: productData["subcategory"] as? String,
                                 offerId: nil
                             )
                             

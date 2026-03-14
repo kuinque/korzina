@@ -160,7 +160,7 @@ class ShopView: UIViewController {
     }
     
     private func setUpBackgroundBlocks() {
-        // Первый белый блок (верхний) - высота 115, нижние углы закруглены
+        // Первый белый блок (верхний) - от верха экрана до 57px ниже safeArea, нижние углы закруглены
         topWhiteBlock.backgroundColor = .white
         topWhiteBlock.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(topWhiteBlock)
@@ -171,11 +171,11 @@ class ShopView: UIViewController {
         view.addSubview(bottomWhiteBlock)
         
         NSLayoutConstraint.activate([
-            // Первый блок: сверху экрана, высота 115
+            // Первый блок: сверху экрана до 57px ниже safeArea (что дает центрирование элементов)
             topWhiteBlock.topAnchor.constraint(equalTo: view.topAnchor),
             topWhiteBlock.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             topWhiteBlock.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            topWhiteBlock.heightAnchor.constraint(equalToConstant: 115),
+            topWhiteBlock.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 57),
             
             // Второй блок: на 7 пикселей ниже первого, до конца экрана
             bottomWhiteBlock.topAnchor.constraint(equalTo: topWhiteBlock.bottomAnchor, constant: 7),
@@ -390,9 +390,9 @@ class ShopView: UIViewController {
         }()
         
         NSLayoutConstraint.activate([
-            // Кружок: 46 пикселей от левой части экрана, 6 пикселей сверху от safeArea
+            // Кружок: 41 пиксель от левой части экрана, 6 пикселей от safeArea сверху
             containerView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 41),
-            containerView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 0),
+            containerView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 6),
             containerView.widthAnchor.constraint(equalToConstant: 45),
             containerView.heightAnchor.constraint(equalToConstant: 45),
             
@@ -431,16 +431,16 @@ class ShopView: UIViewController {
         
         NSLayoutConstraint.activate([
             // Название магазина: 9 пикселей от safeArea сверху, 95 от левого края
-            shopNameLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 0),
+            shopNameLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 9),
             shopNameLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 95),
             
             // Адрес: на 3 пикселя ниже названия магазина, тот же отступ слева
             addressLabel.topAnchor.constraint(equalTo: shopNameLabel.bottomAnchor, constant: -5),
             addressLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 95),
             
-            // Кнопка меню: на той же высоте, что и название магазина, 328.5 от левого края
-            menuButton.topAnchor.constraint(equalTo: shopNameLabel.topAnchor),
-            menuButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 328.5),
+            // Кнопка меню: на той же высоте, что и название магазина, справа с отступом
+            menuButton.topAnchor.constraint(equalTo: shopNameLabel.topAnchor, constant: -5),
+            menuButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
             menuButton.widthAnchor.constraint(equalToConstant: 44),
             menuButton.heightAnchor.constraint(equalToConstant: 44)
         ])
@@ -640,11 +640,10 @@ class ShopView: UIViewController {
         view.addSubview(searchBar)
         searchBar.translatesAutoresizingMaskIntoConstraints = false
         searchBar.pinTop(to: bottomWhiteBlock.topAnchor, 18)
-        // Центрируем searchBar и задаем точные размеры 372x40
-        searchBar.centerXAnchor.constraint(equalTo: view.centerXAnchor).isActive = true
-        // Задаем точные размеры 372x40
+        // Растягиваем searchBar с отступами от краев экрана
         NSLayoutConstraint.activate([
-            searchBar.widthAnchor.constraint(equalToConstant: 372),
+            searchBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 11),
+            searchBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -11),
             searchBar.heightAnchor.constraint(equalToConstant: 40)
         ])
         // Делаем сам searchBar прозрачным, чтобы был виден только textField
@@ -789,27 +788,24 @@ class ShopView: UIViewController {
     private var isAppendingProducts = false
     
     private func displayProductsGrid(_ products: [ProductViewModel]) {
-        // Сохраняем количество товаров до обновления
         let previousCount = self.products.count
         
-        // Обновляем массив товаров
-        self.products = products
-        
-        // Если это добавление новых товаров (append) и список увеличился, используем performBatchUpdates
-        if isAppendingProducts && previousCount > 0 && products.count > previousCount {
-            let indexPaths = (previousCount..<products.count).map { IndexPath(item: $0, section: 0) }
-            productsCollectionView.performBatchUpdates({
-                productsCollectionView.insertItems(at: indexPaths)
-            }, completion: nil)
+        if isAppendingProducts {
+            self.products.append(contentsOf: products)
+            if previousCount > 0 && !products.isEmpty {
+                let indexPaths = (previousCount..<self.products.count).map { IndexPath(item: $0, section: 0) }
+                productsCollectionView.performBatchUpdates({
+                    productsCollectionView.insertItems(at: indexPaths)
+                }, completion: nil)
             } else {
-            // Если это первая загрузка, полная замена или список стал меньше - используем reloadData
+                productsCollectionView.reloadData()
+            }
+        } else {
+            self.products = products
             productsCollectionView.reloadData()
         }
         
-        // Сбрасываем флаг
         isAppendingProducts = false
-        
-        // Принудительно обновляем layout для немедленного отображения
         productsCollectionView.layoutIfNeeded()
     }
     
@@ -1472,7 +1468,7 @@ class ShopView: UIViewController {
         view.addSubview(basketButton)
         
         NSLayoutConstraint.activate([
-            basketButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 77),
+            basketButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             basketButton.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -34),
             basketButton.widthAnchor.constraint(equalToConstant: 242),
             basketButton.heightAnchor.constraint(equalToConstant: 53)

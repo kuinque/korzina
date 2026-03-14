@@ -32,6 +32,7 @@ class CartManager {
     static let shared = CartManager()
     
     private var cartItems: [String: CartItem] = [:]
+    private var cartOrder: [String] = [] // Массив для сохранения порядка добавления товаров
     private var cartTotal: Double = 0.0
     
     // Кэш корзин других магазинов
@@ -60,11 +61,19 @@ class CartManager {
         print("   🖼️ Image URL: \(product.imageURL ?? "nil")")
         
         if let existingItem = cartItems[product.name] {
-            cartItems[product.name] = CartItem(product: product, quantity: existingItem.quantity + 1)
+            // Товар уже есть - просто увеличиваем количество, порядок не меняется
+            cartItems[product.name] = CartItem(
+                product: product, 
+                quantity: existingItem.quantity + 1,
+                originalProductName: existingItem.originalProductName,
+                isIdentical: existingItem.isIdentical
+            )
             print("   ➕ Updated quantity: \(existingItem.quantity + 1)")
         } else {
+            // Новый товар - добавляем в конец
             cartItems[product.name] = CartItem(product: product, quantity: 1)
-            print("   ➕ New item, quantity: 1")
+            cartOrder.append(product.name)
+            print("   ➕ New item, quantity: 1, added to end of cart")
         }
         updateCartTotal()
         NotificationCenter.default.post(name: CartManager.cartDidChangeNotification, object: nil)
@@ -73,9 +82,17 @@ class CartManager {
     func removeFromCart(product: ProductViewModel) {
         if let existingItem = cartItems[product.name] {
             if existingItem.quantity > 1 {
-                cartItems[product.name] = CartItem(product: product, quantity: existingItem.quantity - 1)
+                // Уменьшаем количество, порядок не меняется
+                cartItems[product.name] = CartItem(
+                    product: product, 
+                    quantity: existingItem.quantity - 1,
+                    originalProductName: existingItem.originalProductName,
+                    isIdentical: existingItem.isIdentical
+                )
             } else {
+                // Удаляем товар полностью
                 cartItems.removeValue(forKey: product.name)
+                cartOrder.removeAll { $0 == product.name }
             }
         }
         updateCartTotal()
@@ -84,9 +101,24 @@ class CartManager {
     
     func updateCartQuantity(product: ProductViewModel, quantity: Int) {
         if quantity > 0 {
-            cartItems[product.name] = CartItem(product: product, quantity: quantity)
+            let existingOriginalName = cartItems[product.name]?.originalProductName
+            let existingIsIdentical = cartItems[product.name]?.isIdentical ?? false
+            let isNewItem = cartItems[product.name] == nil
+            
+            cartItems[product.name] = CartItem(
+                product: product, 
+                quantity: quantity,
+                originalProductName: existingOriginalName,
+                isIdentical: existingIsIdentical
+            )
+            
+            // Если товара не было - добавляем в конец
+            if isNewItem {
+                cartOrder.append(product.name)
+            }
         } else {
             cartItems.removeValue(forKey: product.name)
+            cartOrder.removeAll { $0 == product.name }
         }
         updateCartTotal()
         NotificationCenter.default.post(name: CartManager.cartDidChangeNotification, object: nil)
@@ -97,7 +129,8 @@ class CartManager {
     }
     
     func getAllCartItems() -> [CartItem] {
-        return Array(cartItems.values)
+        // Возвращаем товары в порядке добавления
+        return cartOrder.compactMap { cartItems[$0] }
     }
     
     func getCartTotal() -> Double {
@@ -106,6 +139,7 @@ class CartManager {
     
     func clearCart() {
         cartItems.removeAll()
+        cartOrder.removeAll()
         cartTotal = 0.0
         cachedShopCarts.removeAll()
         isCacheInitialized = false
@@ -144,7 +178,12 @@ class CartManager {
         // Ищем существующий товар по имени
         if let index = cart.items.firstIndex(where: { $0.product.name == item.product.name }) {
             // Обновляем данные товара (включая изображение) и увеличиваем количество
-            cart.items[index] = CartItem(product: item.product, quantity: cart.items[index].quantity + item.quantity)
+            cart.items[index] = CartItem(
+                product: item.product, 
+                quantity: cart.items[index].quantity + item.quantity,
+                originalProductName: cart.items[index].originalProductName,
+                isIdentical: cart.items[index].isIdentical
+            )
             print("🔄 Updated existing item in \(shopName): \(item.product.name), new quantity: \(cart.items[index].quantity)")
         } else {
             cart.items.append(item)
@@ -202,6 +241,7 @@ struct ProductViewModel {
     let imageURL: String?
     let description: String?
     let category: String?
+    let subcategory: String?
     let offerId: Int? // ID оффера из API для сравнения цен
 }
 
